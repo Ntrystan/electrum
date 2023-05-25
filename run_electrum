@@ -32,7 +32,7 @@ _min_python_version_tuple = tuple(map(int, (MIN_PYTHON_VERSION.split("."))))
 
 
 if sys.version_info[:3] < _min_python_version_tuple:
-    sys.exit("Error: Electrum requires Python version >= %s..." % MIN_PYTHON_VERSION)
+    sys.exit(f"Error: Electrum requires Python version >= {MIN_PYTHON_VERSION}...")
 
 
 import warnings
@@ -48,9 +48,9 @@ is_binary_distributable = is_pyinstaller or is_android or is_appimage
 # is_local: unpacked tar.gz but not pip installed, or git clone
 is_local = (not is_binary_distributable
             and os.path.exists(os.path.join(script_dir, "electrum.desktop")))
-is_git_clone = is_local and os.path.exists(os.path.join(script_dir, ".git"))
-
-if is_git_clone:
+if is_git_clone := is_local and os.path.exists(
+    os.path.join(script_dir, ".git")
+):
     # developers should probably see all deprecation warnings.
     warnings.simplefilter('default', DeprecationWarning)
 
@@ -265,10 +265,14 @@ async def run_offline_command(config, config_options, plugins: 'Plugins'):
     # decode json arguments
     if cmdname not in ('setconfig',):
         args = list(map(json_decode, args))
-    # options
-    kwargs = {}
-    for x in cmd.options:
-        kwargs[x] = (config_options.get(x) if x in ['wallet_path', 'wallet', 'password', 'new_password'] else config.get(x))
+    kwargs = {
+        x: (
+            config_options.get(x)
+            if x in ['wallet_path', 'wallet', 'password', 'new_password']
+            else config.get(x)
+        )
+        for x in cmd.options
+    }
     cmd_runner = Commands(config=config)
     func = getattr(cmd_runner, cmd.name)
     result = await func(*args, **kwargs)
@@ -320,16 +324,15 @@ def main():
     # read arguments from stdin pipe and prompt
     for i, arg in enumerate(sys.argv):
         if arg == '-':
-            if not sys.stdin.isatty():
-                sys.argv[i] = sys.stdin.read()
-                break
-            else:
+            if sys.stdin.isatty():
                 raise Exception('Cannot get argument from stdin')
-        elif arg == '?':
-            sys.argv[i] = input("Enter argument:")
+            sys.argv[i] = sys.stdin.read()
+            break
         elif arg == ':':
             sys.argv[i] = prompt_password('Enter argument (will not echo):', False)
 
+        elif arg == '?':
+            sys.argv[i] = input("Enter argument:")
     # parse command line
     parser = get_parser()
     args = parser.parse_args()
@@ -412,9 +415,7 @@ def main():
             print_stderr("Daemon already running (lockfile detected).")
             print_stderr("Run 'electrum stop' to stop the daemon.")
             sys.exit(1)
-        # fork before creating the asyncio event loop
-        pid = os.fork()
-        if pid:
+        if pid := os.fork():
             print_stderr("starting daemon (PID %d)" % pid)
             sys.exit(0)
         else:
@@ -443,10 +444,26 @@ def main():
 
 
 def handle_cmd(*, cmdname: str, config: 'SimpleConfig', config_options: dict):
-    if cmdname == 'gui':
+    if cmdname == 'daemon':
         configure_logging(config)
         fd = daemon.get_file_descriptor(config)
-        if fd is not None:
+        if fd is None:
+            # FIXME this message is lost in detached mode (parent process already exited after forking)
+            print_msg("Daemon already running")
+            sys_exit(1)
+        else:
+            # run daemon
+            init_plugins(config, 'cmdline')
+            d = daemon.Daemon(config, fd)
+            d.run_daemon()
+            sys_exit(0)
+    elif cmdname == 'gui':
+        configure_logging(config)
+        fd = daemon.get_file_descriptor(config)
+        if fd is None:
+            result = daemon.request(config, 'gui', (config_options,))
+
+        else:
             plugins = init_plugins(config, config.get('gui', 'qt'))
             d = daemon.Daemon(config, fd, start_network=False)
             try:
@@ -456,29 +473,25 @@ def handle_cmd(*, cmdname: str, config: 'SimpleConfig', config_options: dict):
                 sys_exit(1)
             else:
                 sys_exit(0)
-        else:
-            result = daemon.request(config, 'gui', (config_options,))
-
-    elif cmdname == 'daemon':
-
-        configure_logging(config)
-        fd = daemon.get_file_descriptor(config)
-        if fd is not None:
-            # run daemon
-            init_plugins(config, 'cmdline')
-            d = daemon.Daemon(config, fd)
-            d.run_daemon()
-            sys_exit(0)
-        else:
-            # FIXME this message is lost in detached mode (parent process already exited after forking)
-            print_msg("Daemon already running")
-            sys_exit(1)
     else:
         # command line
         configure_logging(config, log_to_file=False)  # don't spam logfiles for each client-side RPC, but support "-v"
         cmd = known_commands[cmdname]
         wallet_path = config.get_wallet_path()
-        if not config.get('offline'):
+        if config.get('offline'):
+            if cmd.requires_network:
+                print_msg("This command cannot be run offline")
+                sys_exit(1)
+            init_cmdline(config_options, wallet_path, False, config=config)
+            plugins = init_plugins(config, 'cmdline')
+            coro = run_offline_command(config, config_options, plugins)
+            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+            try:
+                result = fut.result()
+            except Exception as e:
+                print_stderr(str(e) or repr(e))
+                sys_exit(1)
+        else:
             init_cmdline(config_options, wallet_path, True, config=config)
             timeout = config.get('timeout', 60)
             if timeout: timeout = int(timeout)
@@ -494,19 +507,6 @@ def handle_cmd(*, cmdname: str, config: 'SimpleConfig', config_options: dict):
                         print_msg("Found lingering lockfile for daemon. Removing.")
                         daemon.remove_lockfile(lockfile)
                 sys_exit(1)
-            except Exception as e:
-                print_stderr(str(e) or repr(e))
-                sys_exit(1)
-        else:
-            if cmd.requires_network:
-                print_msg("This command cannot be run offline")
-                sys_exit(1)
-            init_cmdline(config_options, wallet_path, False, config=config)
-            plugins = init_plugins(config, 'cmdline')
-            coro = run_offline_command(config, config_options, plugins)
-            fut = asyncio.run_coroutine_threadsafe(coro, loop)
-            try:
-                result = fut.result()
             except Exception as e:
                 print_stderr(str(e) or repr(e))
                 sys_exit(1)

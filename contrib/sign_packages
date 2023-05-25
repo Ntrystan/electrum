@@ -7,6 +7,6 @@ if __name__ == '__main__':
     for fname in os.listdir('.'):
         if fname.endswith('asc'):
             continue
-        sig_name = fname + '.' + username + '.asc'
+        sig_name = f'{fname}.{username}.asc'
         os.system(f"gpg --sign --armor --detach --output {sig_name} {fname}")
     os.chdir("..")

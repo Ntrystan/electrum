@@ -36,4 +36,4 @@ __version__ = ELECTRUM_VERSION
 
 _logger = get_logger(__name__)
 if not __debug__:
-    _logger.warning(f"__debug__ is False. running with asserts disabled!")
+    _logger.warning("__debug__ is False. running with asserts disabled!")

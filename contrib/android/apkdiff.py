@@ -31,7 +31,9 @@ class ApkDiff:
 
         for (sourceEntryName, destinationEntryName) in zip(sourceEntrySortedList, destinationEntrySortedList):
             if sourceEntryName != destinationEntryName:
-                print("Sorted manifests don't match, %s vs %s" % (sourceEntryName, destinationEntryName))
+                print(
+                    f"Sorted manifests don't match, {sourceEntryName} vs {destinationEntryName}"
+                )
                 return False
 
         return True
@@ -51,7 +53,9 @@ class ApkDiff:
                     destinationEntry = destinationZip.open(destinationEntryInfo, 'r')
 
                     if not self.compareFiles(sourceEntry, destinationEntry):
-                        print("APK entry %s does not match %s!" % (sourceEntryInfo.filename, destinationEntryInfo.filename))
+                        print(
+                            f"APK entry {sourceEntryInfo.filename} does not match {destinationEntryInfo.filename}!"
+                        )
                         return False
 
                     destinationInfoList.remove(destinationEntryInfo)
@@ -77,8 +81,7 @@ if __name__ == '__main__':
         print("Usage: apkdiff <pathToFirstApk> <pathToSecondApk>")
         sys.exit(1)
 
-    match = ApkDiff().compare(sys.argv[1], sys.argv[2])
-    if match:
+    if match := ApkDiff().compare(sys.argv[1], sys.argv[2]):
         sys.exit(0)
     else:
         sys.exit(1)

@@ -122,7 +122,7 @@ def parse_max_spend(amt: Any) -> Optional[int]:
     address2, 3!
     ```
     """
-    if not (isinstance(amt, str) and amt and amt[-1] == '!'):
+    if not isinstance(amt, str) or not amt or amt[-1] != '!':
         return None
     if amt == '!':
         return 1
@@ -131,9 +131,7 @@ def parse_max_spend(amt: Any) -> Optional[int]:
         x = int(x)
     except ValueError:
         return None
-    if x > 0:
-        return x
-    return None
+    return x if x > 0 else None
 
 class NotEnoughFunds(Exception):
     def __str__(self):
@@ -154,10 +152,7 @@ class InvalidPassword(Exception):
         self.message = message
 
     def __str__(self):
-        if self.message is None:
-            return _("Incorrect password")
-        else:
-            return str(self.message)
+        return _("Incorrect password") if self.message is None else str(self.message)
 
 
 class AddTransactionException(Exception):
@@ -211,9 +206,7 @@ def to_decimal(x: Union[str, float, int, Decimal]) -> Decimal:
     #   Decimal('41754.680999999996856786310672760009765625')
     #   >>> Decimal("41754.681")
     #   Decimal('41754.681')
-    if isinstance(x, Decimal):
-        return x
-    return Decimal(str(x))
+    return x if isinstance(x, Decimal) else Decimal(str(x))
 
 
 # note: this is not a NamedTuple as then its json encoding cannot be customized
@@ -256,7 +249,7 @@ class Fiat(object):
         return self
 
     def __repr__(self):
-        return 'Fiat(%s)'% self.__str__()
+        return f'Fiat({self.__str__()})'
 
     def __str__(self):
         if self.value is None or self.value.is_nan():
@@ -476,14 +469,14 @@ def android_backup_dir():
 def android_data_dir():
     import jnius
     PythonActivity = jnius.autoclass('org.kivy.android.PythonActivity')
-    return PythonActivity.mActivity.getFilesDir().getPath() + '/data'
+    return f'{PythonActivity.mActivity.getFilesDir().getPath()}/data'
 
 def ensure_sparse_file(filename):
     # On modern Linux, no need to do anything.
     # On Windows, need to explicitly mark file.
     if os.name == "nt":
         try:
-            os.system('fsutil sparse setflag "{}" 1'.format(filename))
+            os.system(f'fsutil sparse setflag "{filename}" 1')
         except Exception as e:
             _logger.info(f'error marking file {filename} as sparse: {e}')
 
@@ -498,18 +491,23 @@ def assert_datadir_available(config_path):
         return
     else:
         raise FileNotFoundError(
-            'Electrum datadir does not exist. Was it deleted while running?' + '\n' +
-            'Should be at {}'.format(path))
+            (
+                'Electrum datadir does not exist. Was it deleted while running?'
+                + '\n'
+                + f'Should be at {path}'
+            )
+        )
 
 
 def assert_file_in_datadir_available(path, config_path):
     if os.path.exists(path):
         return
-    else:
-        assert_datadir_available(config_path)
-        raise FileNotFoundError(
-            'Cannot find file but datadir is there.' + '\n' +
-            'Should be at {}'.format(path))
+    assert_datadir_available(config_path)
+    raise FileNotFoundError(
+        'Cannot find file but datadir is there.'
+        + '\n'
+        + f'Should be at {path}'
+    )
 
 
 def standardize_path(path):
@@ -551,8 +549,7 @@ def get_android_package_name() -> str:
     from jnius import autoclass
     from android.config import ACTIVITY_CLASS_NAME
     activity = autoclass(ACTIVITY_CLASS_NAME).mActivity
-    pkgname = str(activity.getPackageName())
-    return pkgname
+    return str(activity.getPackageName())
 
 
 def assert_bytes(*args):
@@ -638,8 +635,7 @@ def is_valid_email(s):
 
 def is_hash256_str(text: Any) -> bool:
     if not isinstance(text, str): return False
-    if len(text) != 64: return False
-    return is_hex_str(text)
+    return False if len(text) != 64 else is_hex_str(text)
 
 
 def is_hex_str(text: Any) -> bool:
@@ -649,9 +645,7 @@ def is_hex_str(text: Any) -> bool:
     except:
         return False
     # forbid whitespaces in text:
-    if len(text) != 2 * len(b):
-        return False
-    return True
+    return len(text) == 2 * len(b)
 
 
 def is_integer(val: Any) -> bool:
@@ -659,9 +653,7 @@ def is_integer(val: Any) -> bool:
 
 
 def is_non_negative_integer(val: Any) -> bool:
-    if is_integer(val):
-        return val >= 0
-    return False
+    return val >= 0 if is_integer(val) else False
 
 
 def is_int_or_float(val: Any) -> bool:
@@ -669,9 +661,7 @@ def is_int_or_float(val: Any) -> bool:
 
 
 def is_non_negative_int_or_float(val: Any) -> bool:
-    if is_int_or_float(val):
-        return val >= 0
-    return False
+    return val >= 0 if is_int_or_float(val) else False
 
 
 def chunks(items, size: int):
@@ -729,9 +719,9 @@ def format_satoshis(
     x = Decimal(x).quantize(Decimal(10) ** (-precision))
     # format string
     overall_precision = decimal_point + precision  # max digits after final decimal point
-    decimal_format = "." + str(overall_precision) if overall_precision > 0 else ""
+    decimal_format = f".{str(overall_precision)}" if overall_precision > 0 else ""
     if is_diff:
-        decimal_format = '+' + decimal_format
+        decimal_format = f'+{decimal_format}'
     # initial result
     scale_factor = pow(10, decimal_point)
     result = ("{:" + decimal_format + "f}").format(x / scale_factor)
@@ -784,9 +774,7 @@ def quantize_feerate(fee) -> Union[None, Decimal, int]:
 
 
 def timestamp_to_datetime(timestamp: Union[int, float, None]) -> Optional[datetime]:
-    if timestamp is None:
-        return None
-    return datetime.fromtimestamp(timestamp)
+    return None if timestamp is None else datetime.fromtimestamp(timestamp)
 
 
 def format_time(timestamp: Union[int, float, None]) -> str:
@@ -937,18 +925,16 @@ def block_explorer(config: 'SimpleConfig') -> Optional[str]:
 
 
 def block_explorer_tuple(config: 'SimpleConfig') -> Optional[Tuple[str, dict]]:
-    custom_be = config.get('block_explorer_custom')
-    if custom_be:
-        if isinstance(custom_be, str):
-            return custom_be, _block_explorer_default_api_loc
-        if isinstance(custom_be, (tuple, list)) and len(custom_be) == 2:
-            return tuple(custom_be)
-        _logger.warning(f"not using 'block_explorer_custom' from config. "
-                        f"expected a str or a pair but got {custom_be!r}")
-        return None
-    else:
+    if not (custom_be := config.get('block_explorer_custom')):
         # using one of the hardcoded block explorers
         return block_explorer_info().get(block_explorer(config))
+    if isinstance(custom_be, str):
+        return custom_be, _block_explorer_default_api_loc
+    if isinstance(custom_be, (tuple, list)) and len(custom_be) == 2:
+        return tuple(custom_be)
+    _logger.warning(f"not using 'block_explorer_custom' from config. "
+                    f"expected a str or a pair but got {custom_be!r}")
+    return None
 
 
 def block_explorer_URL(config: 'SimpleConfig', kind: str, item: str) -> Optional[str]:
@@ -1023,8 +1009,8 @@ def parse_URI(
         try:
             m = re.match(r'([0-9.]+)X([0-9])', am)
             if m:
-                k = int(m.group(2)) - 8
-                amount = Decimal(m.group(1)) * pow(Decimal(10), k)
+                k = int(m[2]) - 8
+                amount = Decimal(m[1]) * pow(Decimal(10), k)
             else:
                 amount = Decimal(am) * COIN
             if amount > TOTAL_COIN_SUPPLY_LIMIT_IN_BTC * COIN:
@@ -1095,9 +1081,9 @@ def create_bip21_uri(addr, amount_sat: Optional[int], message: Optional[str],
         extra_query_params = {}
     query = []
     if amount_sat:
-        query.append('amount=%s'%format_satoshis_plain(amount_sat))
+        query.append(f'amount={format_satoshis_plain(amount_sat)}')
     if message:
-        query.append('message=%s'%urllib.parse.quote(message))
+        query.append(f'message={urllib.parse.quote(message)}')
     for k, v in extra_query_params.items():
         if not isinstance(k, str) or k != urllib.parse.quote(k):
             raise Exception(f"illegal key for URI: {repr(k)}")
@@ -1117,20 +1103,18 @@ def create_bip21_uri(addr, amount_sat: Optional[int], message: Optional[str],
 def maybe_extract_lightning_payment_identifier(data: str) -> Optional[str]:
     data = data.strip()  # whitespaces
     data = data.lower()
-    if data.startswith(LIGHTNING_URI_SCHEME + ':ln'):
-        cut_prefix = LIGHTNING_URI_SCHEME + ':'
+    if data.startswith(f'{LIGHTNING_URI_SCHEME}:ln'):
+        cut_prefix = f'{LIGHTNING_URI_SCHEME}:'
         data = data[len(cut_prefix):]
-    if data.startswith('ln'):
-        return data
-    return None
+    return data if data.startswith('ln') else None
 
 
 def is_uri(data: str) -> bool:
     data = data.lower()
-    if (data.startswith(LIGHTNING_URI_SCHEME + ":") or
-            data.startswith(BITCOIN_BIP21_URI_SCHEME + ':')):
-        return True
-    return False
+    return bool(
+        data.startswith(f"{LIGHTNING_URI_SCHEME}:")
+        or data.startswith(f'{BITCOIN_BIP21_URI_SCHEME}:')
+    )
 
 
 class FailedToParsePaymentIdentifier(Exception):
@@ -1155,7 +1139,7 @@ def parse_json(message):
     if n==-1:
         return None, message
     try:
-        j = json.loads(message[0:n].decode('utf8'))
+        j = json.loads(message[:n].decode('utf8'))
     except:
         j = None
     return j, message[n+1:]
@@ -1235,7 +1219,7 @@ def make_dir(path, allow_symlink=True):
     """Make directory if it does not yet exist."""
     if not os.path.exists(path):
         if not allow_symlink and os.path.islink(path):
-            raise Exception('Dangling link: ' + path)
+            raise Exception(f'Dangling link: {path}')
         os.mkdir(path)
         os_chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
@@ -1256,7 +1240,7 @@ def log_exceptions(func):
     assert asyncio.iscoroutinefunction(func), 'func needs to be a coroutine'
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        self = args[0] if len(args) > 0 else None
+        self = args[0] if args else None
         try:
             return await func(*args, **kwargs)
         except asyncio.CancelledError as e:
@@ -1268,6 +1252,7 @@ def log_exceptions(func):
             except BaseException as e2:
                 print(f"logging exception raised: {repr(e2)}... orig exc: {repr(e)} in {func.__name__}")
             raise
+
     return wrapper
 
 
@@ -1562,10 +1547,10 @@ def detect_tor_socks_proxy() -> Optional[Tuple[str, int]]:
         ("127.0.0.1", 9050),
         ("127.0.0.1", 9150),
     ]
-    for net_addr in candidates:
-        if is_tor_socks_port(*net_addr):
-            return net_addr
-    return None
+    return next(
+        (net_addr for net_addr in candidates if is_tor_socks_port(*net_addr)),
+        None,
+    )
 
 
 def is_tor_socks_port(host: str, port: int) -> bool:
@@ -1606,21 +1591,17 @@ def create_and_start_event_loop() -> Tuple[asyncio.AbstractEventLoop,
     if _asyncio_event_loop is not None:
         raise Exception("there is already a running event loop")
 
-    # asyncio.get_event_loop() became deprecated in python3.10. (see https://github.com/python/cpython/issues/83710)
-    # We set a custom event loop policy purely to be compatible with code that
-    # relies on asyncio.get_event_loop().
-    # - in python 3.8-3.9, asyncio.Event.__init__, asyncio.Lock.__init__,
-    #   and similar, calls get_event_loop. see https://github.com/python/cpython/pull/23420
+
+
     class MyEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
         def get_event_loop(self):
             # In case electrum is being used as a library, there might be other
             # event loops in use besides ours. To minimise interfering with those,
             # if there is a loop running in the current thread, return that:
             running_loop = get_running_loop()
-            if running_loop is not None:
-                return running_loop
-            # Otherwise, return our global loop:
-            return get_asyncio_loop()
+            return running_loop if running_loop is not None else get_asyncio_loop()
+
+
     asyncio.set_event_loop_policy(MyEventLoopPolicy())
 
     loop = asyncio.new_event_loop()
@@ -1675,7 +1656,7 @@ class OrderedDictWithIndex(OrderedDict):
 
     def _recalc_index(self):
         self._key_to_pos = {key: pos for (pos, key) in enumerate(self.keys())}
-        self._pos_to_key = {pos: key for (pos, key) in enumerate(self.keys())}
+        self._pos_to_key = dict(enumerate(self.keys()))
 
     def pos_from_key(self, key):
         return self._key_to_pos[key]
@@ -1746,7 +1727,7 @@ def is_ip_address(x: Union[str, bytes]) -> bool:
 
 
 def is_localhost(host: str) -> bool:
-    if str(host) in ('localhost', 'localhost.',):
+    if host in {'localhost', 'localhost.'}:
         return True
     if host[0] == '[' and host[-1] == ']':  # IPv6
         host = host[1:-1]
@@ -1957,10 +1938,7 @@ class MySocksProxy(aiorpcx.SOCKSProxy):
         if not proxy:
             return None
         username, pw = proxy.get('user'), proxy.get('password')
-        if not username or not pw:
-            auth = None
-        else:
-            auth = aiorpcx.socks.SOCKSUserAuth(username, pw)
+        auth = aiorpcx.socks.SOCKSUserAuth(username, pw) if username and pw else None
         addr = aiorpcx.NetAddress(proxy['host'], proxy['port'])
         if proxy['mode'] == "socks4":
             ret = cls(addr, aiorpcx.socks.SOCKS4a, auth)
@@ -1986,14 +1964,10 @@ class JsonRPCClient:
             if resp.status == 200:
                 r = await resp.json()
                 result = r.get('result')
-                error = r.get('error')
-                if error:
-                    return 'Error: ' + str(error)
-                else:
-                    return result
+                return f'Error: {str(error)}' if (error := r.get('error')) else result
             else:
                 text = await resp.text()
-                return 'Error: ' + str(text)
+                return f'Error: {str(text)}'
 
     def add_method(self, endpoint):
         async def coro(*args):
@@ -2013,7 +1987,7 @@ def random_shuffled_copy(x: Iterable[T]) -> List[T]:
 def test_read_write_permissions(path) -> None:
     # note: There might already be a file at 'path'.
     #       Make sure we do NOT overwrite/corrupt that!
-    temp_path = "%s.tmptest.%s" % (path, os.getpid())
+    temp_path = f"{path}.tmptest.{os.getpid()}"
     echo = "fs r/w test"
     try:
         # test READ permissions for actual path

@@ -69,10 +69,7 @@ class RIPEMD160:
     def hexdigest(self):
         """hexdigest()"""
         dig = self.digest()
-        hex_digest = ''
-        for d in dig:
-            hex_digest += '%02x' % d
-        return hex_digest
+        return ''.join('%02x' % d for d in dig)
 
     def copy(self):
         """copy()"""

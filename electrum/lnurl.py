@@ -36,8 +36,7 @@ def decode_lnurl(lnurl: str) -> str:
     if not hrp.startswith("lnurl"):
         raise LnDecodeException("Does not start with lnurl")
     data = convertbits(data, 5, 8, False)
-    url = bytes(data).decode("utf-8")
-    return url
+    return bytes(data).decode("utf-8")
 
 
 class LNURL6Data(NamedTuple):
@@ -59,7 +58,7 @@ async def _request_lnurl(url: str) -> dict:
     except aiohttp.client_exceptions.ClientError as e:
         raise LNURLError(f"Client error: {e}") from e
     except json.JSONDecodeError:
-        raise LNURLError(f"Invalid response from server")
+        raise LNURLError("Invalid response from server")
     # TODO: handling of specific client errors
 
     if "metadata" in response:
@@ -80,14 +79,15 @@ async def request_lnurl(url: str) -> LNURL6Data:
     for m in metadata:
         if m[0] == 'text/plain':
             metadata_plaintext = str(m[1])
-    data = LNURL6Data(
+    return LNURL6Data(
         callback_url=lnurl_dict['callback'],
         max_sendable_sat=int(lnurl_dict['maxSendable']) // 1000,
         min_sendable_sat=int(lnurl_dict['minSendable']) // 1000,
         metadata_plaintext=metadata_plaintext,
-        comment_allowed=int(lnurl_dict['commentAllowed']) if 'commentAllowed' in lnurl_dict else 0
+        comment_allowed=int(lnurl_dict['commentAllowed'])
+        if 'commentAllowed' in lnurl_dict
+        else 0,
     )
-    return data
 
 
 async def callback_lnurl(url: str, params: dict) -> dict:

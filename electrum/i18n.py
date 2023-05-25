@@ -39,7 +39,7 @@ language = gettext.translation('electrum', LOCALE_DIR, fallback=True)
 #       So this does not work:   _(f"My name: {name}")
 #       instead use .format:     _("My name: {}").format(name)
 def _(x: str) -> str:
-    if x == "":
+    if not x:
         return ""  # empty string must not be translated. see #7158
     global language
     return language.gettext(x)

@@ -139,7 +139,7 @@ def DescriptorChecksum(desc: str) -> str:
             clscount = 0
     if clscount > 0:
         c = PolyMod(c, cls)
-    for j in range(0, 8):
+    for _ in range(0, 8):
         c = PolyMod(c, 0)
     c ^= 1
 
@@ -155,7 +155,7 @@ def AddChecksum(desc: str) -> str:
     :param desc: The descriptor string to add a checksum to
     :return: Descriptor with checksum
     """
-    return desc + "#" + DescriptorChecksum(desc)
+    return f"{desc}#{DescriptorChecksum(desc)}"
 
 
 class PubkeyProvider(object):
@@ -230,7 +230,7 @@ class PubkeyProvider(object):
         """
         s = ""
         if self.origin:
-            s += "[{}]".format(self.origin.to_string())
+            s += f"[{self.origin.to_string()}]"
         s += self.pubkey
         if self.deriv_path:
             s += self.deriv_path
@@ -292,16 +292,10 @@ class PubkeyProvider(object):
         return self.pubkey < other.pubkey
 
     def is_range(self) -> bool:
-        if not self.deriv_path:
-            return False
-        if self.deriv_path[-1] == "*":  # TODO hardened
-            return True
-        return False
+        return False if not self.deriv_path else self.deriv_path[-1] == "*"
 
     def has_uncompressed_pubkey(self) -> bool:
-        if self.is_range():  # bip32 implies compressed
-            return False
-        return b"\x04" == self.get_pubkey_bytes()[:1]
+        return False if self.is_range() else self.get_pubkey_bytes()[:1] == b"\x04"
 
 
 class Descriptor(object):
@@ -335,11 +329,7 @@ class Descriptor(object):
 
         :return: The descriptor string
         """
-        return "{}({}{})".format(
-            self.name,
-            ",".join([p.to_string() for p in self.pubkeys]),
-            self.subdescriptors[0].to_string_no_checksum() if len(self.subdescriptors) > 0 else ""
-        )
+        return f'{self.name}({",".join([p.to_string() for p in self.pubkeys])}{self.subdescriptors[0].to_string_no_checksum() if len(self.subdescriptors) > 0 else ""})'
 
     def to_string(self) -> str:
         """
@@ -407,18 +397,15 @@ class Descriptor(object):
         for pubkey in self.pubkeys:
             if pubkey.is_range():
                 return True
-        for desc in self.subdescriptors:
-            if desc.is_range():
-                return True
-        return False
+        return any(desc.is_range() for desc in self.subdescriptors)
 
     def is_segwit(self) -> bool:
-        return any([desc.is_segwit() for desc in self.subdescriptors])
+        return any(desc.is_segwit() for desc in self.subdescriptors)
 
     def get_all_pubkeys(self) -> Set[bytes]:
         """Returns set of pubkeys that appear at any level in this descriptor."""
         assert not self.is_range()
-        all_pubkeys = set([p.get_pubkey_bytes() for p in self.pubkeys])
+        all_pubkeys = {p.get_pubkey_bytes() for p in self.pubkeys}
         for desc in self.subdescriptors:
             all_pubkeys |= desc.get_all_pubkeys()
         return all_pubkeys
@@ -619,7 +606,7 @@ class MultisigDescriptor(Descriptor):
                 self.pubkeys.sort()
 
     def to_string_no_checksum(self) -> str:
-        return "{}({},{})".format(self.name, self.thresh, ",".join([p.to_string() for p in self.pubkeys]))
+        return f'{self.name}({self.thresh},{",".join([p.to_string() for p in self.pubkeys])})'
 
     def expand(self, *, pos: Optional[int] = None) -> "ExpandedScripts":
         der_pks = [p.get_pubkey_bytes(pos=pos) for p in self.pubkeys]
@@ -645,7 +632,7 @@ class MultisigDescriptor(Descriptor):
             dummy_sig = DUMMY_DER_SIG
             signatures += (self.thresh - len(signatures)) * [dummy_sig]
         if len(signatures) < self.thresh:
-            raise MissingSolutionPiece(f"not enough sigs")
+            raise MissingSolutionPiece("not enough sigs")
         assert len(signatures) == self.thresh, f"thresh={self.thresh}, but got {len(signatures)} sigs"
         return ScriptSolutionInner(
             witness_items=(0, *signatures),
@@ -775,15 +762,14 @@ class TRDescriptor(Descriptor):
         for p, depth in enumerate(self.depths):
             r += ","
             while len(path) <= depth:
-                if len(path) > 0:
+                if path:
                     r += "{"
                 path.append(False)
             r += self.subdescriptors[p].to_string_no_checksum()
-            while len(path) > 0 and path[-1]:
-                if len(path) > 0:
-                    r += "}"
+            while path and path[-1]:
+                r += "}"
                 path.pop()
-            if len(path) > 0:
+            if path:
                 path[-1] = True
         r += ")"
         return r
@@ -802,7 +788,7 @@ def _get_func_expr(s: str) -> Tuple[str, str]:
     """
     start = s.index("(")
     end = s.rindex(")")
-    return s[0:start], s[start + 1:end]
+    return s[:start], s[start + 1:end]
 
 
 def _get_const(s: str, const: str) -> str:
@@ -838,7 +824,7 @@ def _get_expr(s: str) -> Tuple[str, str]:
             level -= 1
         elif level == 0 and c in [")", "}", ","]:
             break
-    return s[0:i], s[i:]
+    return s[:i], s[i:]
 
 def parse_pubkey(expr: str, *, ctx: '_ParseDescriptorContext') -> Tuple['PubkeyProvider', str]:
     """

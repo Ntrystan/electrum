@@ -98,7 +98,7 @@ class StoredDict(dict):
             if not self.db or self.db._should_convert_to_stored_dict(key):
                 v = StoredDict(v, self.db, self.path + [key])
         # convert_value is called depth-first
-        if isinstance(v, dict) or isinstance(v, str) or isinstance(v, int):
+        if isinstance(v, (dict, str, int)):
             if self.db:
                 v = self.db._convert_value(self.path, key, v)
         # set parent of StoredObject
@@ -117,10 +117,7 @@ class StoredDict(dict):
 
     @locked
     def pop(self, key, v=_RaiseKeyError):
-        if v is _RaiseKeyError:
-            r = dict.pop(self, key)
-        else:
-            r = dict.pop(self, key, v)
+        r = dict.pop(self, key) if v is _RaiseKeyError else dict.pop(self, key, v)
         if self.db:
             self.db.set_modified(True)
         return r
@@ -189,7 +186,7 @@ class JsonDB(Logger):
         return json.dumps(
             self.data,
             indent=4 if human_readable else None,
-            sort_keys=bool(human_readable),
+            sort_keys=human_readable,
             cls=JsonDBJsonEncoder,
         )
 

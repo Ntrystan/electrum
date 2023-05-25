@@ -90,14 +90,14 @@ class Plugins(DaemonThread):
             gui_good = self.gui_name in d.get('available_for', [])
             if not gui_good:
                 continue
-            details = d.get('registers_wallet_type')
-            if details:
+            if details := d.get('registers_wallet_type'):
                 self.register_wallet_type(name, gui_good, details)
-            details = d.get('registers_keystore')
-            if details:
+            if details := d.get('registers_keystore'):
                 self.register_keystore(name, gui_good, details)
             self.descriptions[name] = d
-            if not d.get('requires_wallet_type') and self.config.get('use_' + name):
+            if not d.get('requires_wallet_type') and self.config.get(
+                f'use_{name}'
+            ):
                 try:
                     self.load_plugin(name)
                 except BaseException as e:
@@ -115,8 +115,9 @@ class Plugins(DaemonThread):
         full_name = f'electrum.plugins.{name}.{self.gui_name}'
         spec = importlib.util.find_spec(full_name)
         if spec is None:
-            raise RuntimeError("%s implementation for %s plugin not found"
-                               % (self.gui_name, name))
+            raise RuntimeError(
+                f"{self.gui_name} implementation for {name} plugin not found"
+            )
         try:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -132,14 +133,11 @@ class Plugins(DaemonThread):
         self.remove_jobs(plugin.thread_jobs())
 
     def enable(self, name: str) -> 'BasePlugin':
-        self.config.set_key('use_' + name, True, True)
-        p = self.get(name)
-        if p:
-            return p
-        return self.load_plugin(name)
+        self.config.set_key(f'use_{name}', True, True)
+        return p if (p := self.get(name)) else self.load_plugin(name)
 
     def disable(self, name: str) -> None:
-        self.config.set_key('use_' + name, False, True)
+        self.config.set_key(f'use_{name}', False, True)
         p = self.get(name)
         if not p:
             return
@@ -279,7 +277,7 @@ class BasePlugin(Logger):
         return []
 
     def is_enabled(self):
-        return self.is_available() and self.config.get('use_'+self.name) is True
+        return self.is_available() and self.config.get(f'use_{self.name}') is True
 
     def is_available(self):
         return True
@@ -350,9 +348,8 @@ T = TypeVar('T')
 def run_in_hwd_thread(func: Callable[[], T]) -> T:
     if threading.current_thread().name.startswith("hwd_comms_thread"):
         return func()
-    else:
-        fut = _hwd_comms_executor.submit(func)
-        return fut.result()
+    fut = _hwd_comms_executor.submit(func)
+    return fut.result()
         #except (concurrent.futures.CancelledError, concurrent.futures.TimeoutError) as e:
 
 
@@ -460,10 +457,14 @@ class DeviceMgr(ThreadJob):
 
     def pairing_code_by_id(self, id_):
         with self.lock:
-            for pairing_code, id2 in self.pairing_code_to_id.items():
-                if id2 == id_:
-                    return pairing_code
-            return None
+            return next(
+                (
+                    pairing_code
+                    for pairing_code, id2 in self.pairing_code_to_id.items()
+                    if id2 == id_
+                ),
+                None,
+            )
 
     def unpair_pairing_code(self, pairing_code):
         with self.lock:
@@ -473,8 +474,7 @@ class DeviceMgr(ThreadJob):
         self._close_client(_id)
 
     def unpair_id(self, id_):
-        pairing_code = self.pairing_code_by_id(id_)
-        if pairing_code:
+        if pairing_code := self.pairing_code_by_id(id_):
             self.unpair_pairing_code(pairing_code)
         else:
             self._close_client(id_)
@@ -541,8 +541,7 @@ class DeviceMgr(ThreadJob):
         devices: Sequence['Device'],
     ) -> Optional['HardwareClientBase']:
         _id = self.id_by_pairing_code(pairing_code)
-        client = self._client_by_id(_id)
-        if client:
+        if client := self._client_by_id(_id):
             if type(client.plugin) != type(plugin):
                 return
             # An unpaired client might have another wallet's handler
@@ -726,8 +725,9 @@ class DeviceMgr(ThreadJob):
             elif vendor_id in self._recognised_vendor:
                 plugin = self._recognised_vendor[vendor_id]
             if plugin:
-                device = plugin.create_device_from_hid_enumeration(d, product_key=product_key)
-                if device:
+                if device := plugin.create_device_from_hid_enumeration(
+                    d, product_key=product_key
+                ):
                     devices.append(device)
         return devices
 
@@ -746,8 +746,7 @@ class DeviceMgr(ThreadJob):
             try:
                 new_devices = f()
             except BaseException as e:
-                self.logger.error('custom device enum failed. func {}, error {}'
-                                  .format(str(f), repr(e)))
+                self.logger.error(f'custom device enum failed. func {str(f)}, error {repr(e)}')
             else:
                 devices.extend(new_devices)
 

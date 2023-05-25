@@ -326,10 +326,7 @@ class CommandsServer(AuthenticatedServer):
         args = [config_options.get(x) for x in cmd.params]
         # decode json arguments
         args = [json_decode(i) for i in args]
-        # options
-        kwargs = {}
-        for x in cmd.options:
-            kwargs[x] = config_options.get(x)
+        kwargs = {x: config_options.get(x) for x in cmd.options}
         if 'wallet_path' in cmd.options:
             kwargs['wallet_path'] = config_options.get('wallet_path')
         elif 'wallet' in cmd.options:
@@ -440,7 +437,7 @@ class Daemon(Logger):
             self._stopping_soon_or_errored.set()
 
     def start_network(self):
-        self.logger.info(f"starting network.")
+        self.logger.info("starting network.")
         assert not self.config.get('offline')
         assert self.network
         # server-side watchtower
@@ -464,8 +461,7 @@ class Daemon(Logger):
         path = standardize_path(path)
         # wizard will be launched if we return
         if path in self._wallets:
-            wallet = self._wallets[path]
-            return wallet
+            return self._wallets[path]
         wallet = self._load_wallet(path, password, manual_upgrades=manual_upgrades, config=self.config)
         if wallet is None:
             return
@@ -498,8 +494,7 @@ class Daemon(Logger):
             return
         if db.get_action():
             return
-        wallet = Wallet(db, storage, config=config)
-        return wallet
+        return Wallet(db, storage, config=config)
 
     @with_wallet_lock
     def add_wallet(self, wallet: Abstract_Wallet) -> None:
@@ -585,7 +580,7 @@ class Daemon(Logger):
         self.logger.info(f'launching GUI: {gui_name}')
         try:
             try:
-                gui = __import__('electrum.gui.' + gui_name, fromlist=['electrum'])
+                gui = __import__(f'electrum.gui.{gui_name}', fromlist=['electrum'])
             except GuiImportError as e:
                 sys.exit(str(e))
             self.gui_object = gui.ElectrumGui(config=config, daemon=self, plugins=plugins)
@@ -627,7 +622,6 @@ class Daemon(Logger):
                     pass
                 except Exception:
                     self.logger.exception(f'failed to load wallet at {path!r}:')
-                    pass
             if wallet is None:
                 failed.append(path)
                 continue
@@ -646,7 +640,7 @@ class Daemon(Logger):
             if new_password:
                 self.logger.info(f'updating password for wallet: {path!r}')
                 wallet.update_password(old_password_real, new_password, encrypt_storage=True)
-        can_be_unified = failed == []
+        can_be_unified = not failed
         is_unified = can_be_unified and is_unified
         return can_be_unified, is_unified
 

@@ -23,7 +23,7 @@ dirname = sys.argv[1]
 print("directory", dirname)
 
 download_page = os.path.join(dirname, "panel-download.html")
-download_template = download_page + ".template"
+download_template = f"{download_page}.template"
 
 with open(download_template) as f:
     string = f.read()
@@ -60,7 +60,7 @@ for f in list_dir:
     if f.endswith('.asc'):
         parts = f.split('.')
         signer = parts[-2]
-        filename = '.'.join(parts[0:-2])
+        filename = '.'.join(parts[:-2])
         detected_sigs[signer].add(filename)
 for k, v in detected_sigs.items():
     if v == set(files.values()):
@@ -74,11 +74,11 @@ signers_list = ', '.join("<a href=\"https://raw.githubusercontent.com/spesmilo/e
 string = string.replace("##signers_list##", signers_list)
 
 for k, filename in files.items():
-    path = "dist/%s"%filename
+    path = f"dist/{filename}"
     assert filename in list_dir
-    link = "https://download.electrum.org/%s/%s"%(version, filename)
-    string = string.replace("##link_%s##"%k, link)
-    string = string.replace("##sigs_%s##"%k, link+'.asc')
+    link = f"https://download.electrum.org/{version}/{filename}"
+    string = string.replace(f"##link_{k}##", link)
+    string = string.replace(f"##sigs_{k}##", f'{link}.asc')
 
 with open(download_page,'w') as f:
     f.write(string)

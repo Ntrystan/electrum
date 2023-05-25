@@ -167,9 +167,7 @@ class BaseInvoice(StoredObject):
         Callers who need msat precision should call get_amount_msat()
         """
         amount_msat = self.amount_msat
-        if amount_msat in [None, "!"]:
-            return amount_msat
-        return int(amount_msat // 1000)
+        return amount_msat if amount_msat in [None, "!"] else int(amount_msat // 1000)
 
     @amount_msat.validator
     def _validate_amount(self, attribute, value):
@@ -338,14 +336,12 @@ class Request(BaseInvoice):
             extra['exp'] = str(int(self.exp))
         if lightning_invoice:
             extra['lightning'] = lightning_invoice
-        if not addr and lightning_invoice:
-            return "bitcoin:?lightning="+lightning_invoice
-        if not addr and not lightning_invoice:
-            return None
+        if not addr:
+            return f"bitcoin:?lightning={lightning_invoice}" if lightning_invoice else None
         uri = create_bip21_uri(addr, amount, message, extra_query_params=extra)
         return str(uri)
 
 
 def get_id_from_onchain_outputs(outputs: Sequence[PartialTxOutput], *, timestamp: int) -> str:
     outputs_str = "\n".join(f"{txout.scriptpubkey.hex()}, {txout.value}" for txout in outputs)
-    return sha256d(outputs_str + "%d" % timestamp).hex()[0:10]
+    return sha256d(outputs_str + "%d" % timestamp).hex()[:10]

@@ -201,9 +201,7 @@ def recover_ems(mnemonics: List[str]) -> EncryptedSeed:
 
     if len(groups) < group_threshold:
         raise Slip39Error(
-            "Insufficient number of mnemonic groups. Expected {} full groups, but {} were provided.".format(
-                group_threshold, len(groups)
-            )
+            f"Insufficient number of mnemonic groups. Expected {group_threshold} full groups, but {len(groups)} were provided."
         )
 
     group_shares = [
@@ -307,7 +305,7 @@ def process_mnemonics(mnemonics: List[str]) -> Tuple[bool, str]:
 
     # Compile information about groups.
     groups_completed = 0
-    for i, group in groups.items():
+    for group in groups.values():
         if group:
             member_threshold = next(iter(group)).member_threshold
             if len(group) >= member_threshold:
@@ -361,18 +359,34 @@ def _make_group_prefix(identifier, iteration_exponent, group_index, group_thresh
     val <<= 4
     val += group_count - 1
     val >>= 2
-    prefix = ' '.join(wordlist[idx] for idx in _int_to_indices(val, _GROUP_PREFIX_LENGTH_WORDS, _RADIX_BITS))
-    return prefix
+    return ' '.join(
+        wordlist[idx]
+        for idx in _int_to_indices(
+            val, _GROUP_PREFIX_LENGTH_WORDS, _RADIX_BITS
+        )
+    )
 
 
 def _group_status(group: Set[Share], group_prefix) -> str:
     len(group)
     if not group:
-        return _EMPTY + '<b>0</b> ' + _('shares from group') + ' <b>' + group_prefix + '</b>.<br/>'
-    else:
-        share = next(iter(group))
-        icon = _FINISHED if len(group) >= share.member_threshold else _INPROGRESS
-        return icon + '<b>%d</b> ' % len(group) + _('of') + ' <b>%d</b> ' % share.member_threshold + _('shares needed from group') + ' <b>%s</b>.<br/>' % group_prefix
+        return (
+            f'{_EMPTY}<b>0</b> '
+            + _('shares from group')
+            + ' <b>'
+            + group_prefix
+            + '</b>.<br/>'
+        )
+    share = next(iter(group))
+    icon = _FINISHED if len(group) >= share.member_threshold else _INPROGRESS
+    return (
+        icon
+        + '<b>%d</b> ' % len(group)
+        + _('of')
+        + ' <b>%d</b> ' % share.member_threshold
+        + _('shares needed from group')
+        + f' <b>{group_prefix}</b>.<br/>'
+    )
 
 
 """
@@ -402,8 +416,8 @@ def _mnemonic_to_indices(mnemonic: str) -> List[int]:
             indices.append(wordlist.index(word.lower()))
         except ValueError:
             if len(word) > 8:
-                word = word[:8] + '...'
-            raise Slip39Error(_('Invalid mnemonic word') + ' "%s".' % word) from None
+                word = f'{word[:8]}...'
+            raise Slip39Error(_('Invalid mnemonic word') + f' "{word}".') from None
     return indices
 
 
@@ -447,8 +461,8 @@ def _rs1024_verify_checksum(data: Indices) -> bool:
 
 
 def _precompute_exp_log() -> Tuple[List[int], List[int]]:
-    exp = [0 for i in range(255)]
-    log = [0 for i in range(256)]
+    exp = [0 for _ in range(255)]
+    log = [0 for _ in range(256)]
 
     poly = 1
     for i in range(255):
@@ -479,12 +493,12 @@ def _interpolate(shares, x) -> bytes:
     :rtype: Array of bytes.
     """
 
-    x_coordinates = set(share[0] for share in shares)
+    x_coordinates = {share[0] for share in shares}
 
     if len(x_coordinates) != len(shares):
         raise Slip39Error("Invalid set of shares. Share indices must be unique.")
 
-    share_value_lengths = set(len(share[1]) for share in shares)
+    share_value_lengths = {len(share[1]) for share in shares}
     if len(share_value_lengths) != 1:
         raise Slip39Error(
             "Invalid set of shares. All share values must have the same length."
@@ -582,9 +596,7 @@ def _decode_mnemonics(
 
     if len(identifiers) != 1 or len(iteration_exponents) != 1:
         raise Slip39Error(
-            "Invalid set of mnemonics. All mnemonics must begin with the same {} words.".format(
-                _ID_EXP_LENGTH_WORDS
-            )
+            f"Invalid set of mnemonics. All mnemonics must begin with the same {_ID_EXP_LENGTH_WORDS} words."
         )
 
     if len(group_thresholds) != 1:
@@ -597,8 +609,8 @@ def _decode_mnemonics(
             "Invalid set of mnemonics. All mnemonics must have the same group count."
         )
 
-    for group_index, group in groups.items():
-        if len(set(share[0] for share in group[1])) != len(group[1]):
+    for group in groups.values():
+        if len({share[0] for share in group[1]}) != len(group[1]):
             raise Slip39Error(
                 "Invalid set of shares. Member indices in each group must be unique."
             )

@@ -82,7 +82,7 @@ def bech32_create_checksum(encoding: Encoding, hrp: str, data: List[int]) -> Lis
 def bech32_encode(encoding: Encoding, hrp: str, data: List[int]) -> str:
     """Compute a Bech32 or Bech32m string given HRP and data values."""
     combined = data + bech32_create_checksum(encoding, hrp, data)
-    return hrp + '1' + ''.join([CHARSET[d] for d in combined])
+    return f'{hrp}1' + ''.join([CHARSET[d] for d in combined])
 
 
 def bech32_decode(bech: str, *, ignore_long_length=False) -> DecodedBech32:
@@ -154,6 +154,4 @@ def encode_segwit_address(hrp: str, witver: int, witprog: bytes) -> Optional[str
     """Encode a segwit address."""
     encoding = Encoding.BECH32 if witver == 0 else Encoding.BECH32M
     ret = bech32_encode(encoding, hrp, [witver] + convertbits(witprog, 8, 5))
-    if decode_segwit_address(hrp, ret) == (None, None):
-        return None
-    return ret
+    return None if decode_segwit_address(hrp, ret) == (None, None) else ret

@@ -48,9 +48,7 @@ class SynchronizerFailure(Exception): pass
 def history_status(h):
     if not h:
         return None
-    status = ''
-    for tx_hash, height in h:
-        status += tx_hash + ':%d:' % height
+    status = ''.join(tx_hash + ':%d:' % height for tx_hash, height in h)
     return hashlib.sha256(status.encode('ascii')).digest().hex()
 
 
@@ -145,7 +143,7 @@ class Synchronizer(SynchronizerBase):
         self._init_done = False
         self.requested_tx = {}
         self.requested_histories = set()
-        self._stale_histories = dict()  # type: Dict[str, asyncio.Task]
+        self._stale_histories = {}
 
     def diagnostic_name(self):
         return self.adb.diagnostic_name()
@@ -228,12 +226,10 @@ class Synchronizer(SynchronizerBase):
             async with self._network_request_semaphore:
                 raw_tx = await self.interface.get_transaction(tx_hash)
         except RPCError as e:
-            # most likely, "No such mempool or blockchain transaction"
-            if allow_server_not_finding_tx:
-                self.requested_tx.pop(tx_hash)
-                return
-            else:
+            if not allow_server_not_finding_tx:
                 raise
+            self.requested_tx.pop(tx_hash)
+            return
         finally:
             self._requests_answered += 1
         tx = Transaction(raw_tx)

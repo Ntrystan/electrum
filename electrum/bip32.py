@@ -65,7 +65,7 @@ def _CKD_priv(parent_privkey: bytes, parent_chaincode: bytes,
     else:
         data = parent_pubkey + child_index
     I = hmac_oneshot(parent_chaincode, data, hashlib.sha512)
-    I_left = ecc.string_to_number(I[0:32])
+    I_left = ecc.string_to_number(I[:32])
     child_privkey = (I_left + ecc.string_to_number(parent_privkey)) % ecc.CURVE_ORDER
     if I_left >= ecc.CURVE_ORDER or child_privkey == 0:
         raise ecc.InvalidECPointException()
@@ -92,7 +92,7 @@ def CKD_pub(parent_pubkey: bytes, parent_chaincode: bytes, child_index: int) -> 
 # i.e.: 'child_index' does not need to fit into 32 bits here! (c.f. trustedcoin billing)
 def _CKD_pub(parent_pubkey: bytes, parent_chaincode: bytes, child_index: bytes) -> Tuple[bytes, bytes]:
     I = hmac_oneshot(parent_chaincode, parent_pubkey + child_index, hashlib.sha512)
-    pubkey = ecc.ECPrivkey(I[0:32]) + ecc.ECPubkey(parent_pubkey)
+    pubkey = ecc.ECPrivkey(I[:32]) + ecc.ECPubkey(parent_pubkey)
     if pubkey.is_at_infinity():
         raise ecc.InvalidECPointException()
     child_pubkey = pubkey.get_public_key_bytes(compressed=True)
@@ -135,13 +135,12 @@ class BIP32Node(NamedTuple):
             net = constants.net
         xkey = DecodeBase58Check(xkey)
         if len(xkey) != 78:
-            raise BitcoinException('Invalid length for extended key: {}'
-                                   .format(len(xkey)))
+            raise BitcoinException(f'Invalid length for extended key: {len(xkey)}')
         depth = xkey[4]
         fingerprint = xkey[5:9]
         child_number = xkey[9:13]
         chaincode = xkey[13:13 + 32]
-        header = int.from_bytes(xkey[0:4], byteorder='big')
+        header = int.from_bytes(xkey[:4], byteorder='big')
         if header in net.XPRV_HEADERS_INV:
             headers_inv = net.XPRV_HEADERS_INV
             is_private = True
@@ -167,7 +166,7 @@ class BIP32Node(NamedTuple):
     @classmethod
     def from_rootseed(cls, seed: bytes, *, xtype: str) -> 'BIP32Node':
         I = hmac_oneshot(b"Bitcoin seed", seed, hashlib.sha512)
-        master_k = I[0:32]
+        master_k = I[:32]
         master_c = I[32:]
         return BIP32Node(xtype=xtype,
                          eckey=ecc.ECPrivkey(master_k),
@@ -212,10 +211,7 @@ class BIP32Node(NamedTuple):
         return payload
 
     def to_xkey(self, *, net=None) -> str:
-        if self.is_private():
-            return self.to_xprv(net=net)
-        else:
-            return self.to_xpub(net=net)
+        return self.to_xprv(net=net) if self.is_private() else self.to_xpub(net=net)
 
     def to_bytes(self, *, net=None) -> bytes:
         if self.is_private():
@@ -249,7 +245,7 @@ class BIP32Node(NamedTuple):
             privkey, chaincode = CKD_priv(privkey, chaincode, child_index)
             depth += 1
         parent_pubkey = ecc.ECPrivkey(parent_privkey).get_public_key_bytes(compressed=True)
-        fingerprint = hash_160(parent_pubkey)[0:4]
+        fingerprint = hash_160(parent_pubkey)[:4]
         child_number = child_index.to_bytes(length=4, byteorder="big")
         return BIP32Node(xtype=self.xtype,
                          eckey=ecc.ECPrivkey(privkey),
@@ -272,7 +268,7 @@ class BIP32Node(NamedTuple):
             parent_pubkey = pubkey
             pubkey, chaincode = CKD_pub(pubkey, chaincode, child_index)
             depth += 1
-        fingerprint = hash_160(parent_pubkey)[0:4]
+        fingerprint = hash_160(parent_pubkey)[:4]
         child_number = child_index.to_bytes(length=4, byteorder="big")
         return BIP32Node(xtype=self.xtype,
                          eckey=ecc.ECPubkey(pubkey),
@@ -286,7 +282,7 @@ class BIP32Node(NamedTuple):
         Note that self.fingerprint is of the *parent*.
         """
         # TODO cache this
-        return hash_160(self.eckey.get_public_key_bytes(compressed=True))[0:4]
+        return hash_160(self.eckey.get_public_key_bytes(compressed=True))[:4]
 
 
 def xpub_type(x):
@@ -321,8 +317,7 @@ def convert_bip32_strpath_to_intpath(n: str) -> List[int]:
     """
     if not n:
         return []
-    if n.endswith("/"):
-        n = n[:-1]
+    n = n.removesuffix("/")
     n = n.split('/')
     # cut leading "m" if present, but do not require it
     if n[0] == "m":
@@ -339,7 +334,9 @@ def convert_bip32_strpath_to_intpath(n: str) -> List[int]:
             prime = BIP32_PRIME
         if x.startswith('-'):
             if prime:
-                raise ValueError(f"bip32 path child index is signalling hardened level in multiple ways")
+                raise ValueError(
+                    "bip32 path child index is signalling hardened level in multiple ways"
+                )
             prime = BIP32_PRIME
         try:
             x_int = int(x)
@@ -436,8 +433,8 @@ def is_xkey_consistent_with_key_origin_info(xkey: str, *,
     if int_path is not None and bip32node.depth > 0:
         if int.from_bytes(bip32node.child_number, 'big') != int_path[-1]:
             return False
-    if bip32node.depth == 1:
-        if bfh(root_fingerprint) != bip32node.fingerprint:
+    if bfh(root_fingerprint) != bip32node.fingerprint:
+        if bip32node.depth == 1:
             return False
     return True
 
@@ -464,7 +461,7 @@ class KeyOriginInfo:
         Deserialize a serialized KeyOriginInfo.
         They will be serialized in the same way that PSBTs serialize derivation paths
         """
-        fingerprint = s[0:4]
+        fingerprint = s[:4]
         s = s[4:]
         path = list(struct.unpack("<" + "I" * (len(s) // 4), s))
         return cls(fingerprint, path)
@@ -500,10 +497,8 @@ class KeyOriginInfo:
         """
         s = s.lower()
         entries = s.split("/")
-        fingerprint = binascii.unhexlify(s[0:8])
-        path: Sequence[int] = []
-        if len(entries) > 1:
-            path = convert_bip32_strpath_to_intpath(s[9:])
+        fingerprint = binascii.unhexlify(s[:8])
+        path = convert_bip32_strpath_to_intpath(s[9:]) if len(entries) > 1 else []
         return cls(fingerprint, path)
 
     def get_derivation_path(self) -> str:

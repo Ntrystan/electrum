@@ -111,8 +111,11 @@ class LNRater(Logger):
             now = time.time()
             # graph should have changed significantly during the sync progress
             # or last analysis was a long time ago
-            if (30 <= progress_percent and progress_percent - self._last_progress_percent >= 10 or
-                    self._last_analyzed + RATER_UPDATE_TIME_SEC < now):
+            if (
+                progress_percent >= 30
+                and progress_percent - self._last_progress_percent >= 10
+                or self._last_analyzed + RATER_UPDATE_TIME_SEC < now
+            ):
                 await self._analyze_graph()
                 self._last_progress_percent = progress_percent
                 self._last_analyzed = now
@@ -212,26 +215,14 @@ class LNRater(Logger):
             min_fee_rate = min(min_fee_rate, stats.mean_fee_rate)
 
         for n, stats in self._node_stats.items():
-            heuristics = []
-            heuristics_weights = []
-
-            # Construct an average score which leads to recommendation of nodes
-            # with low fees, large capacity and reasonable number of channels.
-            # This is somewhat akin to preferential attachment, but low fee
-            # nodes are more favored. Here we make a compromise between user
-            # comfort and decentralization, tending towards user comfort.
-
-            # number of channels
-            heuristics.append(stats.number_channels / max_num_chan)
-            heuristics_weights.append(0.2)
-            # total capacity
-            heuristics.append(stats.total_capacity_msat / max_capacity)
-            heuristics_weights.append(0.8)
             # inverse fees
             fees = min(1E-6, min_fee_rate) / max(1E-10, stats.mean_fee_rate)
-            heuristics.append(fees)
-            heuristics_weights.append(1.0)
-
+            heuristics = [
+                stats.number_channels / max_num_chan,
+                stats.total_capacity_msat / max_capacity,
+                fees,
+            ]
+            heuristics_weights = [0.2, 0.8, 1.0]
             self._node_ratings[n] = weighted_sum(heuristics, heuristics_weights)
 
     def suggest_node_channel_open(self) -> Tuple[bytes, NodeStats]:
@@ -272,7 +263,4 @@ class LNRater(Logger):
         Returns a node ID (pubkey).
         """
         self.maybe_analyze_graph()
-        if self._node_ratings:
-            return self.suggest_node_channel_open()[0]
-        else:
-            return None
+        return self.suggest_node_channel_open()[0] if self._node_ratings else None

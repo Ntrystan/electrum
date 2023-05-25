@@ -37,7 +37,7 @@ def a2b_base64(s):
     try:
         b = bytearray(binascii.a2b_base64(s))
     except Exception as e:
-        raise SyntaxError("base64 error: %s" % e)
+        raise SyntaxError(f"base64 error: {e}")
     return b
 
 def b2a_base64(b):
@@ -59,17 +59,16 @@ def dePem(s, name):
     The first such PEM block in the input will be found, and its
     payload will be base64 decoded and returned.
     """
-    prefix  = "-----BEGIN %s-----" % name
-    postfix = "-----END %s-----" % name
+    prefix = f"-----BEGIN {name}-----"
+    postfix = f"-----END {name}-----"
     start = s.find(prefix)
     if start == -1:
         raise SyntaxError("Missing PEM prefix")
     end = s.find(postfix, start+len(prefix))
     if end == -1:
         raise SyntaxError("Missing PEM postfix")
-    s = s[start+len("-----BEGIN %s-----" % name) : end]
-    retBytes = a2b_base64(s) # May raise SyntaxError
-    return retBytes
+    s = s[start + len(f"-----BEGIN {name}-----"):end]
+    return a2b_base64(s)
 
 def dePemList(s, name):
     """Decode a sequence of PEM blocks into a list of bytearrays.
@@ -95,8 +94,8 @@ def dePemList(s, name):
     of bytearrays, which may have zero elements if not PEM blocks are found.
      """
     bList = []
-    prefix  = "-----BEGIN %s-----" % name
-    postfix = "-----END %s-----" % name
+    prefix = f"-----BEGIN {name}-----"
+    postfix = f"-----END {name}-----"
     while 1:
         start = s.find(prefix)
         if start == -1:
@@ -126,12 +125,14 @@ def pem(b, name):
     while s1:
         s2 += s1[:64] + b"\n"
         s1 = s1[64:]
-    s = ("-----BEGIN %s-----\n" % name).encode('ascii') + s2 + \
-        ("-----END %s-----\n" % name).encode('ascii')
-    return s
+    return (
+        ("-----BEGIN %s-----\n" % name).encode('ascii')
+        + s2
+        + ("-----END %s-----\n" % name).encode('ascii')
+    )
 
 def pemSniff(inStr, name):
-    searchStr = "-----BEGIN %s-----" % name
+    searchStr = f"-----BEGIN {name}-----"
     return searchStr in inStr
 
 

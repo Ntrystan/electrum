@@ -206,10 +206,10 @@ def int_to_hex(i: int, length: int=1) -> str:
     `length` is the number of bytes available
     """
     if not isinstance(i, int):
-        raise TypeError('{} instead of int'.format(i))
+        raise TypeError(f'{i} instead of int')
     range_size = pow(256, length)
     if i < -(range_size//2) or i >= range_size:
-        raise OverflowError('cannot convert int {} to hex ({} bytes)'.format(i, length))
+        raise OverflowError(f'cannot convert int {i} to hex ({length} bytes)')
     if i < 0:
         # two's complement
         i = range_size + i
@@ -249,11 +249,11 @@ def var_int(i: int) -> str:
     if i<0xfd:
         return int_to_hex(i)
     elif i<=0xffff:
-        return "fd"+int_to_hex(i,2)
+        return f"fd{int_to_hex(i, 2)}"
     elif i<=0xffffffff:
-        return "fe"+int_to_hex(i,4)
+        return f"fe{int_to_hex(i, 4)}"
     else:
-        return "ff"+int_to_hex(i,8)
+        return f"ff{int_to_hex(i, 8)}"
 
 
 def witness_push(item: str) -> str:
@@ -344,8 +344,7 @@ def relayfee(network: 'Network' = None) -> int:
         fee = FEERATE_DEFAULT_RELAY
     # sanity safeguards, as network.relay_fee is coming from a server:
     fee = min(fee, FEERATE_MAX_RELAY)
-    fee = max(fee, FEERATE_DEFAULT_RELAY)
-    return fee
+    return max(fee, FEERATE_DEFAULT_RELAY)
 
 
 # see https://github.com/bitcoin/bitcoin/blob/a62f0ed64f8bbbdfe6467ac5ce92ef5b5222d1bd/src/policy/policy.cpp#L14
@@ -377,7 +376,7 @@ def hash_decode(x: str) -> bytes:
 
 def hash160_to_b58_address(h160: bytes, addrtype: int) -> str:
     s = bytes([addrtype]) + h160
-    s = s + sha256d(s)[0:4]
+    s = s + sha256d(s)[:4]
     return base_encode(s, base=58)
 
 
@@ -512,7 +511,7 @@ def address_to_scripthash(addr: str, *, net=None) -> str:
 
 
 def script_to_scripthash(script: str) -> str:
-    h = sha256(bfh(script))[0:32]
+    h = sha256(bfh(script))[:32]
     return h[::-1].hex()
 
 def public_key_to_p2pk_script(pubkey: str) -> str:
@@ -544,11 +543,8 @@ def base_encode(v: bytes, *, base: int) -> str:
     """ encode v, which is a string of bytes, to base58."""
     assert_bytes(v)
     if base not in (58, 43):
-        raise ValueError('not supported base: {}'.format(base))
-    chars = __b58chars
-    if base == 43:
-        chars = __b43chars
-
+        raise ValueError(f'not supported base: {base}')
+    chars = __b43chars if base == 43 else __b58chars
     origlen = len(v)
     v = v.lstrip(b'\x00')
     newlen = len(v)
@@ -559,7 +555,7 @@ def base_encode(v: bytes, *, base: int) -> str:
         num, idx = divmod(num, base)
         string = chars[idx:idx + 1] + string
 
-    result = chars[0:1] * (origlen - newlen) + string
+    result = chars[:1] * (origlen - newlen) + string
     return result.decode('ascii')
 
 
@@ -571,7 +567,7 @@ def base_decode(v: Union[bytes, str], *, base: int) -> Optional[bytes]:
     # assert_bytes(v)
     v = to_bytes(v, 'ascii')
     if base not in (58, 43):
-        raise ValueError('not supported base: {}'.format(base))
+        raise ValueError(f'not supported base: {base}')
     chars = __b58chars
     chars_inv = __b58chars_inv
     if base == 43:
@@ -579,7 +575,7 @@ def base_decode(v: Union[bytes, str], *, base: int) -> Optional[bytes]:
         chars_inv = __b43chars_inv
 
     origlen = len(v)
-    v = v.lstrip(chars[0:1])
+    v = v.lstrip(chars[:1])
     newlen = len(v)
 
     num = 0
@@ -587,7 +583,7 @@ def base_decode(v: Union[bytes, str], *, base: int) -> Optional[bytes]:
         for char in v:
             num = num * base + chars_inv[char]
     except KeyError:
-        raise BaseDecodeError('Forbidden character {} for base {}'.format(char, base))
+        raise BaseDecodeError(f'Forbidden character {char} for base {base}')
 
     return num.to_bytes(origlen - newlen + (num.bit_length() + 7) // 8, 'big')
 
@@ -598,14 +594,14 @@ class InvalidChecksum(BaseDecodeError):
 
 def EncodeBase58Check(vchIn: bytes) -> str:
     hash = sha256d(vchIn)
-    return base_encode(vchIn + hash[0:4], base=58)
+    return base_encode(vchIn + hash[:4], base=58)
 
 
 def DecodeBase58Check(psz: Union[bytes, str]) -> bytes:
     vchRet = base_decode(psz, base=58)
-    payload = vchRet[0:-4]
+    payload = vchRet[:-4]
     csum_found = vchRet[-4:]
-    csum_calculated = sha256d(payload)[0:4]
+    csum_calculated = sha256d(payload)[:4]
     if csum_calculated != csum_found:
         raise InvalidChecksum(f'calculated {csum_calculated.hex()}, found {csum_found.hex()}')
     else:
@@ -627,7 +623,7 @@ WIF_SCRIPT_TYPES_INV = inv_dict(WIF_SCRIPT_TYPES)
 
 
 def is_segwit_script_type(txin_type: str) -> bool:
-    return txin_type in ('p2wpkh', 'p2wpkh-p2sh', 'p2wsh', 'p2wsh-p2sh')
+    return txin_type in {'p2wpkh', 'p2wpkh-p2sh', 'p2wsh', 'p2wsh-p2sh'}
 
 
 def serialize_privkey(secret: bytes, compressed: bool, txin_type: str, *,
@@ -641,10 +637,7 @@ def serialize_privkey(secret: bytes, compressed: bool, txin_type: str, *,
     suffix = b'\01' if compressed else b''
     vchIn = prefix + secret + suffix
     base58_wif = EncodeBase58Check(vchIn)
-    if internal_use:
-        return base58_wif
-    else:
-        return '{}:{}'.format(txin_type, base58_wif)
+    return base58_wif if internal_use else f'{txin_type}:{base58_wif}'
 
 
 def deserialize_privkey(key: str) -> Tuple[str, bytes, bool]:
@@ -655,11 +648,11 @@ def deserialize_privkey(key: str) -> Tuple[str, bytes, bool]:
     if ':' in key:
         txin_type, key = key.split(sep=':', maxsplit=1)
         if txin_type not in WIF_SCRIPT_TYPES:
-            raise BitcoinException('unknown script type: {}'.format(txin_type))
+            raise BitcoinException(f'unknown script type: {txin_type}')
     try:
         vch = DecodeBase58Check(key)
     except Exception as e:
-        neutered_privkey = str(key)[:3] + '..' + str(key)[-2:]
+        neutered_privkey = f'{str(key)[:3]}..{str(key)[-2:]}'
         raise BaseDecodeError(f"cannot deserialize privkey {neutered_privkey}") from e
 
     if txin_type is None:
@@ -668,14 +661,12 @@ def deserialize_privkey(key: str) -> Tuple[str, bytes, bool]:
         try:
             txin_type = WIF_SCRIPT_TYPES_INV[prefix_value]
         except KeyError as e:
-            raise BitcoinException('invalid prefix ({}) for WIF key (1)'.format(vch[0])) from None
-    else:
-        # all other keys must have a fixed first byte
-        if vch[0] != constants.net.WIF_PREFIX:
-            raise BitcoinException('invalid prefix ({}) for WIF key (2)'.format(vch[0]))
+            raise BitcoinException(f'invalid prefix ({vch[0]}) for WIF key (1)') from None
+    elif vch[0] != constants.net.WIF_PREFIX:
+        raise BitcoinException(f'invalid prefix ({vch[0]}) for WIF key (2)')
 
     if len(vch) not in [33, 34]:
-        raise BitcoinException('invalid vch len for WIF key: {}'.format(len(vch)))
+        raise BitcoinException(f'invalid vch len for WIF key: {len(vch)}')
     compressed = False
     if len(vch) == 34:
         if vch[33] == 0x01:
@@ -717,9 +708,7 @@ def is_b58_address(addr: str, *, net=None) -> bool:
         addrtype, h = b58_address_to_hash160(addr)
     except Exception as e:
         return False
-    if addrtype not in [net.ADDRTYPE_P2PKH, net.ADDRTYPE_P2SH]:
-        return False
-    return True
+    return addrtype in [net.ADDRTYPE_P2PKH, net.ADDRTYPE_P2SH]
 
 def is_address(addr: str, *, net=None) -> bool:
     return is_segwit_address(addr, net=net) \
@@ -744,9 +733,12 @@ def is_minikey(text: str) -> bool:
     # A valid minikey must begin with an 'S', be in base58, and when
     # suffixed with '?' have its SHA256 hash begin with a zero byte.
     # They are widely used in Casascius physical bitcoins.
-    return (len(text) >= 20 and text[0] == 'S'
-            and all(ord(c) in __b58chars for c in text)
-            and sha256(text + '?')[0] == 0x00)
+    return (
+        len(text) >= 20
+        and text[0] == 'S'
+        and all(ord(c) in __b58chars for c in text)
+        and sha256(f'{text}?')[0] == 0x00
+    )
 
 def minikey_to_private_key(text: str) -> bytes:
     return sha256(text)

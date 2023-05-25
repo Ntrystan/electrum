@@ -403,7 +403,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             new_db.put('channels', None)
             new_db.put('lightning_privkey2', None)
 
-        new_path = os.path.join(backup_dir, self.basename() + '.backup')
+        new_path = os.path.join(backup_dir, f'{self.basename()}.backup')
         new_storage = WalletStorage(new_path)
         new_storage._encryption_version = self.storage._encryption_version
         new_storage.pubkey = self.storage.pubkey
@@ -456,18 +456,21 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                 await self.adb.stop()
                 await self.taskgroup.cancel_remaining()
         finally:  # even if we get cancelled
-            if any([ks.is_requesting_to_be_rewritten_to_wallet_file for ks in self.get_keystores()]):
+            if any(
+                ks.is_requesting_to_be_rewritten_to_wallet_file
+                for ks in self.get_keystores()
+            ):
                 self.save_keystore()
             self.save_db()
 
     def is_up_to_date(self) -> bool:
-        if self.taskgroup.joined:  # either stop() was called, or the taskgroup died
-            return False
-        return self._up_to_date
+        return False if self.taskgroup.joined else self._up_to_date
 
     def tx_is_related(self, tx):
-        is_mine = any([self.is_mine(out.address) for out in tx.outputs()])
-        is_mine |= any([self.is_mine(self.adb.get_txin_address(txin)) for txin in tx.inputs()])
+        is_mine = any(self.is_mine(out.address) for out in tx.outputs())
+        is_mine |= any(
+            self.is_mine(self.adb.get_txin_address(txin)) for txin in tx.inputs()
+        )
         return is_mine
 
     def clear_tx_parents_cache(self):
@@ -568,7 +571,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         if len(addrs) > 0:
             addr = str(addrs[0])
             if not bitcoin.is_address(addr):
-                neutered_addr = addr[:5] + '..' + addr[-2:]
+                neutered_addr = f'{addr[:5]}..{addr[-2:]}'
                 raise WalletFileException(f'The addresses in this wallet are not bitcoin addresses.\n'
                                           f'e.g. {neutered_addr} (length: {len(addr)})')
 
@@ -592,9 +595,12 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                 self._not_old_change_addresses = self.get_change_addresses()
             self._not_old_change_addresses = [addr for addr in self._not_old_change_addresses
                                               if not self.adb.address_is_old(addr)]
-            unused_addrs = [addr for addr in self._not_old_change_addresses
-                            if not self.adb.is_used(addr) and not self.is_address_reserved(addr)]
-            return unused_addrs
+            return [
+                addr
+                for addr in self._not_old_change_addresses
+                if not self.adb.is_used(addr)
+                and not self.is_address_reserved(addr)
+            ]
 
     def is_deterministic(self) -> bool:
         return self.keystore.is_deterministic()
@@ -617,10 +623,9 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                 if old_text != text:
                     self._labels[name] = text
                     changed = True
-            else:
-                if old_text is not None:
-                    self._labels.pop(name)
-                    changed = True
+            elif old_text is not None:
+                self._labels.pop(name)
+                changed = True
         if changed:
             run_hook('set_label', self, name, text)
         return changed
@@ -672,8 +677,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             return
 
     def is_mine(self, address) -> bool:
-        if not address: return False
-        return bool(self.get_address_index(address))
+        return False if not address else bool(self.get_address_index(address))
 
     def is_change(self, address) -> bool:
         if not self.is_mine(address):
@@ -698,15 +702,13 @@ class Abstract_Wallet(ABC, Logger, EventListener):
     def get_redeem_script(self, address: str) -> Optional[str]:
         desc = self.get_script_descriptor_for_address(address)
         if desc is None: return None
-        redeem_script = desc.expand().redeem_script
-        if redeem_script:
+        if redeem_script := desc.expand().redeem_script:
             return redeem_script.hex()
 
     def get_witness_script(self, address: str) -> Optional[str]:
         desc = self.get_script_descriptor_for_address(address)
         if desc is None: return None
-        witness_script = desc.expand().witness_script
-        if witness_script:
+        if witness_script := desc.expand().witness_script:
             return witness_script.hex()
 
     @abstractmethod
@@ -724,8 +726,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         index = self.get_address_index(address)
         pk, compressed = self.keystore.get_private_key(index, password)
         txin_type = self.get_txin_type(address)
-        serialized_privkey = bitcoin.serialize_privkey(pk, compressed, txin_type)
-        return serialized_privkey
+        return bitcoin.serialize_privkey(pk, compressed, txin_type)
 
     def export_private_key_for_path(self, path: Union[Sequence[int], str], password: Optional[str]) -> str:
         raise Exception("this wallet is not deterministic")
@@ -741,8 +742,10 @@ class Abstract_Wallet(ABC, Logger, EventListener):
     def is_lightning_funding_tx(self, txid: Optional[str]) -> bool:
         if not self.lnworker or txid is None:
             return False
-        return any([chan.funding_outpoint.txid == txid
-                    for chan in self.lnworker.channels.values()])
+        return any(
+            chan.funding_outpoint.txid == txid
+            for chan in self.lnworker.channels.values()
+        )
 
     def get_swap_by_claim_tx(self, tx: Transaction) -> bool:
         return self.lnworker.swap_manager.get_swap_by_claim_tx(tx) if self.lnworker else None
@@ -776,10 +779,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                     v_out_mine += txout.value
                     is_relevant = True
         delta = v_out_mine - v_in_mine
-        if v_in is not None:
-            fee = v_in - v_out
-        else:
-            fee = None
+        fee = v_in - v_out if v_in is not None else None
         if fee is None and isinstance(tx, PartialTransaction):
             fee = tx.get_fee()
         return TxWalletDelta(
@@ -830,8 +830,13 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                         fee_per_byte = fee / size
                         exp_n = self.config.fee_to_depth(fee_per_byte)
                     can_bump = (is_any_input_ismine or is_swap) and not tx.is_final()
-                    can_dscancel = (is_any_input_ismine and not tx.is_final()
-                                    and not all([self.is_mine(txout.address) for txout in tx.outputs()]))
+                    can_dscancel = (
+                        is_any_input_ismine
+                        and not tx.is_final()
+                        and not all(
+                            self.is_mine(txout.address) for txout in tx.outputs()
+                        )
+                    )
                     try:
                         self.cpfp(tx, 0)
                         can_cpfp = True
@@ -886,7 +891,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         """
         if not self.is_up_to_date():
             return {}
-        with self.lock, self.transaction_lock:
+        with (self.lock, self.transaction_lock):
             if self._last_full_history is None:
                 self._last_full_history = self.get_full_history(None)
             result = self._tx_parents_cache.get(txid, None)
@@ -897,7 +902,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             uncles = []
             tx = self.adb.get_transaction(txid)
             assert tx, f"cannot find {txid} in db"
-            for i, txin in enumerate(tx.inputs()):
+            for txin in tx.inputs():
                 _txid = txin.prevout.txid.hex()
                 parents.append(_txid)
                 # detect address reuse
@@ -915,7 +920,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
 
             for _txid in parents + uncles:
                 if _txid in self._last_full_history.keys():
-                    result.update(self.get_tx_parents(_txid))
+                    result |= self.get_tx_parents(_txid)
             result[txid] = parents, uncles
             self._tx_parents_cache[txid] = result
             return result
@@ -1022,7 +1027,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                 'confirmations': hist_item.tx_mined_status.conf,
                 'timestamp': hist_item.tx_mined_status.timestamp,
                 'monotonic_timestamp': monotonic_timestamp,
-                'incoming': True if hist_item.delta>0 else False,
+                'incoming': hist_item.delta > 0,
                 'bc_value': Satoshis(hist_item.delta),
                 'bc_balance': Satoshis(hist_item.balance),
                 'date': timestamp_to_datetime(hist_item.tx_mined_status.timestamp),
@@ -1052,7 +1057,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             exp = URI.get('exp')
         timestamp = timestamp or int(Invoice._get_cur_time())
         exp = exp or 0
-        invoice = Invoice(
+        return Invoice(
             amount_msat=amount_msat,
             message=message,
             time=timestamp,
@@ -1062,7 +1067,6 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             height=height,
             lightning_invoice=None,
         )
-        return invoice
 
     def save_invoice(self, invoice: Invoice, *, write_to_disk: bool = True) -> None:
         key = invoice.get_id()
@@ -1416,7 +1420,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
 
     def liquidation_price(self, coins, price_func, timestamp):
         p = price_func(timestamp)
-        return sum([coin.value_sats() for coin in coins]) * p / Decimal(COIN)
+        return sum(coin.value_sats() for coin in coins) * p / Decimal(COIN)
 
     def default_fiat_value(self, tx_hash, fx, value_sat):
         return value_sat / Decimal(COIN) * self.price_at_timestamp(tx_hash, fx.timestamp_rate)
@@ -1429,14 +1433,12 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             fx: 'FxThread',
             tx_fee: Optional[int],
     ) -> Dict[str, Any]:
-        item = {}
         fiat_value = self.get_fiat_value(tx_hash, fx.ccy)
         fiat_default = fiat_value is None
         fiat_rate = self.price_at_timestamp(tx_hash, fx.timestamp_rate)
         fiat_value = fiat_value if fiat_value is not None else self.default_fiat_value(tx_hash, fx, amount_sat)
         fiat_fee = tx_fee / Decimal(COIN) * fiat_rate if tx_fee is not None else None
-        item['fiat_currency'] = fx.ccy
-        item['fiat_rate'] = Fiat(fiat_rate, fx.ccy)
+        item = {'fiat_currency': fx.ccy, 'fiat_rate': Fiat(fiat_rate, fx.ccy)}
         item['fiat_value'] = Fiat(fiat_value, fx.ccy)
         item['fiat_fee'] = Fiat(fiat_fee, fx.ccy) if fiat_fee is not None else None
         item['fiat_default'] = fiat_default
@@ -1464,22 +1466,21 @@ class Abstract_Wallet(ABC, Logger, EventListener):
     def _get_default_label_for_txid(self, tx_hash: str) -> str:
         if self.lnworker and (label:= self.lnworker.get_label_for_txid(tx_hash)):
             return label
+        # no inputs are ismine -> likely incoming payment -> concat labels of output addresses
+        labels = []
         # note: we don't deserialize tx as the history calls us for every tx, and that would be slow
         if not self.db.get_txi_addresses(tx_hash):
-            # no inputs are ismine -> likely incoming payment -> concat labels of output addresses
-            labels = []
             for addr in self.db.get_txo_addresses(tx_hash):
-                label = self.get_label_for_address(addr)
-                if label:
+                if label := self.get_label_for_address(addr):
                     labels.append(label)
-            return ', '.join(labels)
         else:
-            # some inputs are ismine -> likely outgoing payment
-            labels = []
-            for invoice in self.get_relevant_invoices_for_tx(tx_hash):
-                if invoice.message:
-                    labels.append(invoice.message)
-            return ', '.join(labels)
+            labels.extend(
+                invoice.message
+                for invoice in self.get_relevant_invoices_for_tx(tx_hash)
+                if invoice.message
+            )
+
+        return ', '.join(labels)
 
     def _get_default_label_for_rhash(self, rhash: str) -> str:
         req = self.get_request(rhash)
@@ -1510,9 +1511,9 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             if fee is not None:
                 size = tx.estimated_size()
                 fee_per_byte = fee / size
-                extra.append(format_fee_satoshis(fee_per_byte) + ' sat/b')
+                extra.append(f'{format_fee_satoshis(fee_per_byte)} sat/b')
             if fee is not None and height in (TX_HEIGHT_UNCONF_PARENT, TX_HEIGHT_UNCONFIRMED) \
-               and self.config.has_fee_mempool():
+                   and self.config.has_fee_mempool():
                 exp_n = self.config.fee_to_depth(fee_per_byte)
                 if exp_n is not None:
                     extra.append(self.config.get_depth_mb_str(exp_n))
@@ -1529,7 +1530,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         time_str = format_time(timestamp) if timestamp else _("unknown")
         status_str = TX_STATUS[status] if status < 4 else time_str
         if extra:
-            status_str += ' [%s]'%(', '.join(extra))
+            status_str += f" [{', '.join(extra)}]"
         return status, status_str
 
     def relayfee(self):
@@ -1558,11 +1559,17 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             # is_mine outputs should not be spent yet
             # to avoid cancelling our own dependent transactions
             txid = tx.txid()
-            if any([self.is_mine(o.address) and self.db.get_spent_outpoint(txid, output_idx)
-                    for output_idx, o in enumerate(tx.outputs())]):
+            if any(
+                self.is_mine(o.address)
+                and self.db.get_spent_outpoint(txid, output_idx)
+                for output_idx, o in enumerate(tx.outputs())
+            ):
                 continue
             # all inputs should be is_mine
-            if not all([self.is_mine(self.adb.get_txin_address(txin)) for txin in tx.inputs()]):
+            if not all(
+                self.is_mine(self.adb.get_txin_address(txin))
+                for txin in tx.inputs()
+            ):
                 continue
             # do not mutate LN funding txs, as that would change their txid
             if self.is_lightning_funding_tx(txid):
@@ -1593,11 +1600,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             else:
                 change_addrs = [preferred_change_addr]
         elif self.use_change:
-            # Recalc and get unused change addresses
-            addrs = self.calc_unused_change_addresses()
-            # New change addresses are created only after a few
-            # confirmations.
-            if addrs:
+            if addrs := self.calc_unused_change_addresses():
                 # if there are any unused, select all
                 change_addrs = addrs
             else:
@@ -1617,27 +1620,23 @@ class Abstract_Wallet(ABC, Logger, EventListener):
     def get_single_change_address_for_new_transaction(
             self, preferred_change_addr=None, *, allow_reusing_used_change_addrs: bool = True,
     ) -> Optional[str]:
-        addrs = self.get_change_addresses_for_new_transaction(
+        if addrs := self.get_change_addresses_for_new_transaction(
             preferred_change_addr=preferred_change_addr,
             allow_reusing_used_change_addrs=allow_reusing_used_change_addrs,
-        )
-        if addrs:
+        ):
             return addrs[0]
         return None
 
     @check_returned_address_for_corruption
     def get_new_sweep_address_for_channel(self) -> str:
-        # Recalc and get unused change addresses
-        addrs = self.calc_unused_change_addresses()
-        if addrs:
+        if addrs := self.calc_unused_change_addresses():
             selected_addr = addrs[0]
+        elif addrs := self.get_change_addresses(
+            slice_start=-self.gap_limit_for_change
+        ):
+            selected_addr = random.choice(addrs)
         else:
-            # if there are none, take one randomly from the last few
-            addrs = self.get_change_addresses(slice_start=-self.gap_limit_for_change)
-            if addrs:
-                selected_addr = random.choice(addrs)
-            else:  # fallback for e.g. imported wallets
-                selected_addr = self.get_receiving_address()
+            selected_addr = self.get_receiving_address()
         assert is_address(selected_addr), f"not valid bitcoin address: {selected_addr}"
         return selected_addr
 
@@ -1664,7 +1663,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
 
         if not coins:  # any bitcoin tx must have at least 1 input by consensus
             raise NotEnoughFunds()
-        if any([c.already_has_some_signatures() for c in coins]):
+        if any(c.already_has_some_signatures() for c in coins):
             raise Exception("Some inputs already contain signatures!")
 
         # prevent side-effect with '!'
@@ -1698,7 +1697,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         # set if we merge with another transaction
         rbf_merge_txid = None
 
-        if len(i_max) == 0:
+        if not i_max:
             # Let the coin chooser select the coins to spend
             coin_chooser = coinchooser.get_coin_chooser(self.config)
             # If there is an unconfirmed RBF tx, merge with it
@@ -1827,10 +1826,10 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             # we should typically have the funding tx available;
             # might not have it e.g. while not up_to_date
             return True
-        if any(self.is_mine(self.adb.get_txin_address(txin))
-               for txin in funding_tx.inputs()):
-            return False
-        return True
+        return not any(
+            self.is_mine(self.adb.get_txin_address(txin))
+            for txin in funding_tx.inputs()
+        )
 
     def set_frozen_state_of_addresses(self, addrs: Sequence[str], freeze: bool) -> bool:
         """Set frozen state of the addresses to FREEZE, True or False"""
@@ -1851,7 +1850,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         [TxOutpoint.from_str(utxo) for utxo in utxos]
         with self._freeze_lock:
             for utxo in utxos:
-                self._frozen_coins[utxo] = bool(freeze)
+                self._frozen_coins[utxo] = freeze
         util.trigger_callback('status')
 
     def is_address_reserved(self, addr: str) -> bool:
@@ -1969,10 +1968,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
                 # the coinchooser bump fee method is probably not a good idea in this case
                 raise CannotBumpFee(_('All outputs are non-change is_mine'))
             old_not_is_mine = list(filter(lambda o: not self.is_mine(o.address), old_outputs))
-            if old_not_is_mine:
-                fixed_outputs = old_not_is_mine
-            else:
-                fixed_outputs = old_outputs
+            fixed_outputs = old_not_is_mine if old_not_is_mine else old_outputs
         if not fixed_outputs:
             raise CannotBumpFee(_('Could not figure out which outputs to keep'))
 
@@ -1984,6 +1980,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             self.add_input_info(item)
         def fee_estimator(size):
             return self.config.estimate_fee_for_feerate(fee_per_kb=new_fee_rate*1000, size=size)
+
         coin_chooser = coinchooser.get_coin_chooser(self.config)
         try:
             return coin_chooser.make_tx(
@@ -2110,9 +2107,12 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         if self.is_billing_address(txout.address):
             return False
         # submarine swap funding outputs must not be decreased
-        if self.lnworker and self.lnworker.swap_manager.is_lockup_address_for_a_swap(txout.address):
-            return False
-        return True
+        return (
+            not self.lnworker
+            or not self.lnworker.swap_manager.is_lockup_address_for_a_swap(
+                txout.address
+            )
+        )
 
     def cpfp(self, tx: Transaction, fee: int) -> Optional[PartialTransaction]:
         txid = tx.txid()
@@ -2170,7 +2170,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         # grab all ismine inputs
         inputs = [txin for txin in tx.inputs()
                   if self.is_mine(self.adb.get_txin_address(txin))]
-        value = sum([txin.value_sats() for txin in inputs])
+        value = sum(txin.value_sats() for txin in inputs)
         # figure out output address
         old_change_addrs = [o.address for o in tx.outputs() if self.is_mine(o.address)]
         out_address = (self.get_single_change_address_for_new_transaction(old_change_addrs)
@@ -2212,8 +2212,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         address = address or txin.address
         if txin.witness_utxo is None and txin.is_segwit() and address:
             received, spent = self.adb.get_addr_io(address)
-            item = received.get(txin.prevout.to_str())
-            if item:
+            if item := received.get(txin.prevout.to_str()):
                 txin_value = item[2]
                 txin.witness_utxo = TxOutput.from_address_and_value(address, txin_value)
         if txin.utxo is None:
@@ -2305,9 +2304,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             for k in self.get_keystores():
                 if k.can_sign_txin(txin):
                     return True
-        if self.get_swap_by_claim_tx(tx):
-            return True
-        return False
+        return bool(self.get_swap_by_claim_tx(tx))
 
     def add_output_info(self, txout: PartialTxOutput, *, only_der_suffix: bool = False) -> None:
         address = txout.address
@@ -2326,9 +2323,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             return
         if not isinstance(tx, PartialTransaction):
             return
-        # note: swap signing does not require the password
-        swap = self.get_swap_by_claim_tx(tx)
-        if swap:
+        if swap := self.get_swap_by_claim_tx(tx):
             self.lnworker.swap_manager.sign_tx(tx, swap)
             return tx
         # add info to a temporary tx copy; including xpubs
@@ -2366,15 +2361,13 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         """Get an unused receiving address, if there is one.
         Note: there might NOT be one available!
         """
-        addrs = self.get_unused_addresses()
-        if addrs:
+        if addrs := self.get_unused_addresses():
             return addrs[0]
 
     @check_returned_address_for_corruption
     def get_receiving_address(self) -> str:
         """Get a receiving address. Guaranteed to always return an address."""
-        unused_addr = self.get_unused_address()
-        if unused_addr:
+        if unused_addr := self.get_unused_address():
             return unused_addr
         domain = self.get_receiving_addresses()
         if not domain:
@@ -2466,8 +2459,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         return self._receive_requests.get(request_id)
 
     def get_formatted_request(self, request_id):
-        x = self.get_request(request_id)
-        if x:
+        if x := self.get_request(request_id):
             return self.export_request(x)
 
     def export_request(self, x: Request) -> Dict[str, Any]:
@@ -2582,8 +2574,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             bip70=None,
             payment_hash=payment_hash,
         )
-        key = self.add_payment_request(req)
-        return key
+        return self.add_payment_request(req)
 
     def add_payment_request(self, req: Request, *, write_to_disk: bool = True):
         request_id = req.get_id()
@@ -2773,7 +2764,7 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         """
         if txin_value is None:
             return Decimal('NaN')
-        cache_key = "{}:{}:{}".format(str(txid), str(ccy), str(txin_value))
+        cache_key = f"{str(txid)}:{str(ccy)}:{str(txin_value)}"
         result = self._coin_price_cache.get(cache_key, None)
         if result is not None:
             return result
@@ -2785,9 +2776,8 @@ class Abstract_Wallet(ABC, Logger, EventListener):
             fiat_value = self.get_fiat_value(txid, ccy)
             if fiat_value is not None:
                 return fiat_value
-            else:
-                p = self.price_at_timestamp(txid, price_func)
-                return p * txin_value/Decimal(COIN)
+            p = self.price_at_timestamp(txid, price_func)
+            return p * txin_value/Decimal(COIN)
 
     def is_billing_address(self, addr):
         # overridden for TrustedCoin wallets
@@ -2850,18 +2840,18 @@ class Abstract_Wallet(ABC, Logger, EventListener):
         """
         assert isinstance(tx, PartialTransaction)
         # if we have all full previous txs, we *know* all the input amounts -> fine
-        if all([txin.utxo for txin in tx.inputs()]):
+        if all(txin.utxo for txin in tx.inputs()):
             return None
         # a single segwit input -> fine
         if len(tx.inputs()) == 1 and tx.inputs()[0].is_segwit() and tx.inputs()[0].witness_utxo:
             return None
         # coinjoin or similar
-        if any([not self.is_mine(txin.address) for txin in tx.inputs()]):
+        if any(not self.is_mine(txin.address) for txin in tx.inputs()):
             return (_("Warning") + ": "
                     + _("The input amounts could not be verified as the previous transactions are missing.\n"
                         "The amount of money being spent CANNOT be verified."))
         # some inputs are legacy
-        if any([not txin.is_segwit() for txin in tx.inputs()]):
+        if any(not txin.is_segwit() for txin in tx.inputs()):
             return (_("Warning") + ": "
                     + _("The fee could not be verified. Signing non-segwit inputs is risky:\n"
                         "if this transaction was maliciously modified before you sign,\n"

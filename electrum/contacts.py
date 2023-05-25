@@ -85,8 +85,7 @@ class Contacts(dict, Logger):
                     'address': addr,
                     'type': 'contact'
                 }
-        out = self.resolve_openalias(k)
-        if out:
+        if out := self.resolve_openalias(k):
             address, name, validated = out
             return {
                 'address': address,
@@ -119,7 +118,7 @@ class Contacts(dict, Logger):
         prefix = 'btc'
         for record in records:
             string = to_string(record.strings[0], 'utf8')
-            if string.startswith('oa1:' + prefix):
+            if string.startswith(f'oa1:{prefix}'):
                 address = self.find_regex(string, r'recipient_address=([A-Za-z0-9]+)')
                 name = self.find_regex(string, r'recipient_name=([^;]+)')
                 if not name:

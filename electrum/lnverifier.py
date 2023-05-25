@@ -183,6 +183,4 @@ def verify_sig_for_channel_update(chan_upd: dict, node_id: bytes) -> bool:
     pre_hash = msg_bytes[2+64:]
     h = sha256d(pre_hash)
     sig = chan_upd['signature']
-    if not ecc.verify_signature(node_id, sig, h):
-        return False
-    return True
+    return bool(ecc.verify_signature(node_id, sig, h))

@@ -189,7 +189,7 @@ class LocalConfig(ChannelConfig):
     per_commitment_secret_seed = attr.ib(type=bytes, converter=hex_to_bytes)
 
     @classmethod
-    def from_seed(self, **kwargs):
+    def from_seed(cls, **kwargs):
         channel_seed = kwargs['channel_seed']
         static_remotekey = kwargs.pop('static_remotekey')
         node = BIP32Node.from_rootseed(channel_seed, xtype='standard')
@@ -324,7 +324,7 @@ class Outpoint(StoredObject):
     output_index = attr.ib(type=int)
 
     def to_str(self):
-        return "{}:{}".format(self.txid, self.output_index)
+        return f"{self.txid}:{self.output_index}"
 
 
 class HtlcLog(NamedTuple):
@@ -439,7 +439,9 @@ class RevocationStore:
             this_bucket = self.buckets[i]
             e = shachain_derive(new_element, this_bucket.index)
             if e != this_bucket:
-                raise Exception("hash is not derivable: {} {} {}".format(e.secret.hex(), this_bucket.secret.hex(), this_bucket.index))
+                raise Exception(
+                    f"hash is not derivable: {e.secret.hex()} {this_bucket.secret.hex()} {this_bucket.index}"
+                )
         self.buckets[bucket] = new_element
         self.storage['index'] = index - 1
 
@@ -493,8 +495,7 @@ def get_per_commitment_secret_from_seed(seed: bytes, i: int, bits: int = 48) -> 
         if i & mask:
             per_commitment_secret[bitindex // 8] ^= 1 << (bitindex % 8)
             per_commitment_secret = bytearray(sha256(per_commitment_secret))
-    bajts = bytes(per_commitment_secret)
-    return bajts
+    return bytes(per_commitment_secret)
 
 def secret_to_pubkey(secret: int) -> bytes:
     assert type(secret) is int
@@ -565,14 +566,14 @@ def make_htlc_tx_inputs(htlc_output_txid: str, htlc_output_index: int,
     txin.witness_script = bfh(witness_script)
     txin.script_sig = b''
     txin._trusted_value_sats = amount_msat // 1000
-    c_inputs = [txin]
-    return c_inputs
+    return [txin]
 
 def make_htlc_tx(*, cltv_expiry: int, inputs: List[PartialTxInput], output: PartialTxOutput) -> PartialTransaction:
     assert type(cltv_expiry) is int
     c_outputs = [output]
-    tx = PartialTransaction.from_io(inputs, c_outputs, locktime=cltv_expiry, version=2)
-    return tx
+    return PartialTransaction.from_io(
+        inputs, c_outputs, locktime=cltv_expiry, version=2
+    )
 
 def make_offered_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
                       local_htlcpubkey: bytes, payment_hash: bytes) -> bytes:
@@ -580,35 +581,38 @@ def make_offered_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
     assert type(remote_htlcpubkey) is bytes
     assert type(local_htlcpubkey) is bytes
     assert type(payment_hash) is bytes
-    script = bfh(construct_script([
-        opcodes.OP_DUP,
-        opcodes.OP_HASH160,
-        bitcoin.hash_160(revocation_pubkey),
-        opcodes.OP_EQUAL,
-        opcodes.OP_IF,
-        opcodes.OP_CHECKSIG,
-        opcodes.OP_ELSE,
-        remote_htlcpubkey,
-        opcodes.OP_SWAP,
-        opcodes.OP_SIZE,
-        32,
-        opcodes.OP_EQUAL,
-        opcodes.OP_NOTIF,
-        opcodes.OP_DROP,
-        2,
-        opcodes.OP_SWAP,
-        local_htlcpubkey,
-        2,
-        opcodes.OP_CHECKMULTISIG,
-        opcodes.OP_ELSE,
-        opcodes.OP_HASH160,
-        crypto.ripemd(payment_hash),
-        opcodes.OP_EQUALVERIFY,
-        opcodes.OP_CHECKSIG,
-        opcodes.OP_ENDIF,
-        opcodes.OP_ENDIF,
-    ]))
-    return script
+    return bfh(
+        construct_script(
+            [
+                opcodes.OP_DUP,
+                opcodes.OP_HASH160,
+                bitcoin.hash_160(revocation_pubkey),
+                opcodes.OP_EQUAL,
+                opcodes.OP_IF,
+                opcodes.OP_CHECKSIG,
+                opcodes.OP_ELSE,
+                remote_htlcpubkey,
+                opcodes.OP_SWAP,
+                opcodes.OP_SIZE,
+                32,
+                opcodes.OP_EQUAL,
+                opcodes.OP_NOTIF,
+                opcodes.OP_DROP,
+                2,
+                opcodes.OP_SWAP,
+                local_htlcpubkey,
+                2,
+                opcodes.OP_CHECKMULTISIG,
+                opcodes.OP_ELSE,
+                opcodes.OP_HASH160,
+                crypto.ripemd(payment_hash),
+                opcodes.OP_EQUALVERIFY,
+                opcodes.OP_CHECKSIG,
+                opcodes.OP_ENDIF,
+                opcodes.OP_ENDIF,
+            ]
+        )
+    )
 
 def make_received_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
                        local_htlcpubkey: bytes, payment_hash: bytes, cltv_expiry: int) -> bytes:
@@ -616,38 +620,41 @@ def make_received_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
         assert type(i) is bytes
     assert type(cltv_expiry) is int
 
-    script = bfh(construct_script([
-        opcodes.OP_DUP,
-        opcodes.OP_HASH160,
-        bitcoin.hash_160(revocation_pubkey),
-        opcodes.OP_EQUAL,
-        opcodes.OP_IF,
-        opcodes.OP_CHECKSIG,
-        opcodes.OP_ELSE,
-        remote_htlcpubkey,
-        opcodes.OP_SWAP,
-        opcodes.OP_SIZE,
-        32,
-        opcodes.OP_EQUAL,
-        opcodes.OP_IF,
-        opcodes.OP_HASH160,
-        crypto.ripemd(payment_hash),
-        opcodes.OP_EQUALVERIFY,
-        2,
-        opcodes.OP_SWAP,
-        local_htlcpubkey,
-        2,
-        opcodes.OP_CHECKMULTISIG,
-        opcodes.OP_ELSE,
-        opcodes.OP_DROP,
-        cltv_expiry,
-        opcodes.OP_CHECKLOCKTIMEVERIFY,
-        opcodes.OP_DROP,
-        opcodes.OP_CHECKSIG,
-        opcodes.OP_ENDIF,
-        opcodes.OP_ENDIF,
-    ]))
-    return script
+    return bfh(
+        construct_script(
+            [
+                opcodes.OP_DUP,
+                opcodes.OP_HASH160,
+                bitcoin.hash_160(revocation_pubkey),
+                opcodes.OP_EQUAL,
+                opcodes.OP_IF,
+                opcodes.OP_CHECKSIG,
+                opcodes.OP_ELSE,
+                remote_htlcpubkey,
+                opcodes.OP_SWAP,
+                opcodes.OP_SIZE,
+                32,
+                opcodes.OP_EQUAL,
+                opcodes.OP_IF,
+                opcodes.OP_HASH160,
+                crypto.ripemd(payment_hash),
+                opcodes.OP_EQUALVERIFY,
+                2,
+                opcodes.OP_SWAP,
+                local_htlcpubkey,
+                2,
+                opcodes.OP_CHECKMULTISIG,
+                opcodes.OP_ELSE,
+                opcodes.OP_DROP,
+                cltv_expiry,
+                opcodes.OP_CHECKLOCKTIMEVERIFY,
+                opcodes.OP_DROP,
+                opcodes.OP_CHECKSIG,
+                opcodes.OP_ENDIF,
+                opcodes.OP_ENDIF,
+            ]
+        )
+    )
 
 WITNESS_TEMPLATE_OFFERED_HTLC = [
     opcodes.OP_DUP,
@@ -969,9 +976,9 @@ def make_commitment(
 
     assert sum(x.value for x in c_outputs_filtered) <= funding_sat, (c_outputs_filtered, funding_sat)
 
-    # create commitment tx
-    tx = PartialTransaction.from_io(c_inputs, c_outputs_filtered, locktime=locktime, version=2)
-    return tx
+    return PartialTransaction.from_io(
+        c_inputs, c_outputs_filtered, locktime=locktime, version=2
+    )
 
 def make_commitment_output_to_local_witness_script(
         revocation_pubkey: bytes, to_self_delay: int, delayed_pubkey: bytes,
@@ -979,18 +986,21 @@ def make_commitment_output_to_local_witness_script(
     assert type(revocation_pubkey) is bytes
     assert type(to_self_delay) is int
     assert type(delayed_pubkey) is bytes
-    script = bfh(construct_script([
-        opcodes.OP_IF,
-        revocation_pubkey,
-        opcodes.OP_ELSE,
-        to_self_delay,
-        opcodes.OP_CHECKSEQUENCEVERIFY,
-        opcodes.OP_DROP,
-        delayed_pubkey,
-        opcodes.OP_ENDIF,
-        opcodes.OP_CHECKSIG,
-    ]))
-    return script
+    return bfh(
+        construct_script(
+            [
+                opcodes.OP_IF,
+                revocation_pubkey,
+                opcodes.OP_ELSE,
+                to_self_delay,
+                opcodes.OP_CHECKSEQUENCEVERIFY,
+                opcodes.OP_DROP,
+                delayed_pubkey,
+                opcodes.OP_ENDIF,
+                opcodes.OP_CHECKSIG,
+            ]
+        )
+    )
 
 def make_commitment_output_to_local_address(
         revocation_pubkey: bytes, to_self_delay: int, delayed_pubkey: bytes) -> str:
@@ -1003,8 +1013,7 @@ def make_commitment_output_to_remote_address(remote_payment_pubkey: bytes) -> st
 def sign_and_get_sig_string(tx: PartialTransaction, local_config, remote_config):
     tx.sign({local_config.multisig_key.pubkey.hex(): (local_config.multisig_key.privkey, True)})
     sig = tx.inputs()[0].part_sigs[local_config.multisig_key.pubkey]
-    sig_64 = sig_string_from_der_sig(sig[:-1])
-    return sig_64
+    return sig_string_from_der_sig(sig[:-1])
 
 def funding_output_script(local_config, remote_config) -> str:
     return funding_output_script_from_keys(local_config.multisig_key.pubkey, remote_config.multisig_key.pubkey)
@@ -1176,12 +1185,17 @@ class LnFeatures(IntFlag):
         features = LnFeatures(0)
         for flag in list_enabled_bits(self):
             ctxs = _ln_feature_contexts[1 << flag]
-            if LnFeatureContexts.CHAN_ANN_AS_IS & ctxs:
+            if (
+                not LnFeatureContexts.CHAN_ANN_AS_IS & ctxs
+                and LnFeatureContexts.CHAN_ANN_ALWAYS_EVEN & ctxs
+                and flag % 2 == 0
+                or LnFeatureContexts.CHAN_ANN_AS_IS & ctxs
+            ):
                 features |= (1 << flag)
-            elif LnFeatureContexts.CHAN_ANN_ALWAYS_EVEN & ctxs:
-                if flag % 2 == 0:
-                    features |= (1 << flag)
-            elif LnFeatureContexts.CHAN_ANN_ALWAYS_ODD & ctxs:
+            elif (
+                not LnFeatureContexts.CHAN_ANN_ALWAYS_EVEN & ctxs
+                and LnFeatureContexts.CHAN_ANN_ALWAYS_ODD & ctxs
+            ):
                 if flag % 2 == 0:
                     flag = get_ln_flag_pair_of_bit(flag)
                 features |= (1 << flag)
@@ -1260,10 +1274,7 @@ class ChannelType(IntFlag):
 
     @property
     def name_minimal(self):
-        if self.name:
-            return self.name.replace('OPTION_', '')
-        else:
-            return str(self)
+        return self.name.replace('OPTION_', '') if self.name else str(self)
 
 
 del LNFC  # name is ambiguous without context
@@ -1292,10 +1303,7 @@ def get_ln_flag_pair_of_bit(flag_bit: int) -> int:
     e.g. 6 -> 7
     e.g. 7 -> 6
     """
-    if flag_bit % 2 == 0:
-        return flag_bit + 1
-    else:
-        return flag_bit - 1
+    return flag_bit + 1 if flag_bit % 2 == 0 else flag_bit - 1
 
 
 
@@ -1312,17 +1320,16 @@ def ln_compare_features(our_features: 'LnFeatures', their_features: int) -> 'LnF
     their_flags = set(list_enabled_bits(their_features))
     # check that they have our required features, and disable the optional features they don't have
     for flag in our_flags:
-        if flag not in their_flags and get_ln_flag_pair_of_bit(flag) not in their_flags:
-            # they don't have this feature we wanted :(
-            if flag % 2 == 0:  # even flags are compulsory
-                raise IncompatibleLightningFeatures(f"remote does not support {LnFeatures(1 << flag)!r}")
-            our_features ^= 1 << flag  # disable flag
-        else:
+        if flag in their_flags or get_ln_flag_pair_of_bit(flag) in their_flags:
             # They too have this flag.
             # For easier feature-bit-testing, if this is an even flag, we also
             # set the corresponding odd flag now.
             if flag % 2 == 0 and our_features & (1 << flag):
                 our_features |= 1 << get_ln_flag_pair_of_bit(flag)
+        elif flag % 2 == 0:  # even flags are compulsory
+            raise IncompatibleLightningFeatures(f"remote does not support {LnFeatures(1 << flag)!r}")
+        else:
+            our_features ^= 1 << flag  # disable flag
     # check that we have their required features
     for flag in their_flags:
         if flag not in our_flags and get_ln_flag_pair_of_bit(flag) not in our_flags:
@@ -1379,7 +1386,7 @@ class LNPeerAddr:
         self._net_addr = net_addr
 
     def __str__(self):
-        return '{}@{}'.format(self.pubkey.hex(), self.net_addr_str())
+        return f'{self.pubkey.hex()}@{self.net_addr_str()}'
 
     def __repr__(self):
         return f'<LNPeerAddr host={self.host} port={self.port} pubkey={self.pubkey.hex()}>'
@@ -1413,7 +1420,7 @@ def get_compressed_pubkey_from_bech32(bech32_pubkey: str) -> bytes:
     if decoded_bech32.encoding != segwit_addr.Encoding.BECH32:
         raise ValueError("Bad bech32 encoding: must be using vanilla BECH32")
     if hrp != 'ln':
-        raise Exception('unexpected hrp: {}'.format(hrp))
+        raise Exception(f'unexpected hrp: {hrp}')
     data_8bits = segwit_addr.convertbits(data_5bits, 5, 8, False)
     # pad with zeroes
     COMPRESSED_PUBKEY_LENGTH = 33
@@ -1427,8 +1434,7 @@ def make_closing_tx(local_funding_pubkey: bytes, remote_funding_pubkey: bytes,
     c_input = make_funding_input(local_funding_pubkey, remote_funding_pubkey,
         funding_pos, funding_txid, funding_sat)
     c_input.nsequence = 0xFFFF_FFFF
-    tx = PartialTransaction.from_io([c_input], outputs, locktime=0, version=2)
-    return tx
+    return PartialTransaction.from_io([c_input], outputs, locktime=0, version=2)
 
 
 def split_host_port(host_port: str) -> Tuple[str, str]: # port returned as string
@@ -1439,11 +1445,8 @@ def split_host_port(host_port: str) -> Tuple[str, str]: # port returned as strin
         m = other.match(host_port)
     if not m:
         raise ConnStringFormatError(_('Connection strings must be in <node_pubkey>@<host>:<port> format'))
-    host = m.group('host')
-    if m.group('port'):
-        port = m.group('port')[1:]
-    else:
-        port = '9735'
+    host = m['host']
+    port = m['port'][1:] if m['port'] else '9735'
     try:
         int(port)
     except ValueError:

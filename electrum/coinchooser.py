@@ -58,7 +58,7 @@ class PRNG:
         p = 1
         while p < n:
             r = self.get_bytes(1)[0] + (r << 8)
-            p = p << 8
+            p <<= 8
         return start + (r % n)
 
     def choice(self, seq):
@@ -212,13 +212,14 @@ class CoinChooserBase(Logger):
         amounts = self._change_amounts(tx, len(change_addrs), fee_estimator_numchange)
         assert min(amounts) >= 0
         assert len(change_addrs) >= len(amounts)
-        assert all([isinstance(amt, int) for amt in amounts])
+        assert all(isinstance(amt, int) for amt in amounts)
         # If change is above dust threshold after accounting for the
         # size of the change output, add it to the transaction.
         amounts = [amount for amount in amounts if amount >= dust_threshold]
-        change = [PartialTxOutput.from_address_and_value(addr, amount)
-                  for addr, amount in zip(change_addrs, amounts)]
-        return change
+        return [
+            PartialTxOutput.from_address_and_value(addr, amount)
+            for addr, amount in zip(change_addrs, amounts)
+        ]
 
     def _construct_tx_from_selected_buckets(self, *, buckets: Sequence[Bucket],
                                             base_tx: PartialTransaction, change_addrs,
@@ -357,17 +358,15 @@ class CoinChooserRandom(CoinChooserBase):
             else:
                 raise NotEnoughFunds()
 
-        candidates = set()
-
-        # Add all singletons
-        for n, bucket in enumerate(buckets):
-            if sufficient_funds([bucket], bucket_value_sum=bucket.value):
-                candidates.add((n,))
-
+        candidates = {
+            (n,)
+            for n, bucket in enumerate(buckets)
+            if sufficient_funds([bucket], bucket_value_sum=bucket.value)
+        }
         # And now some random ones
         attempts = min(100, (len(buckets) - 1) * 10 + 1)
         permutation = list(range(len(buckets)))
-        for i in range(attempts):
+        for _ in range(attempts):
             # Get a random permutation of the buckets, and
             # incrementally combine buckets until sufficient
             self.p.shuffle(permutation)
@@ -488,12 +487,8 @@ def get_name(config):
 
 def get_coin_chooser(config) -> CoinChooserBase:
     klass = COIN_CHOOSERS[get_name(config)]
-    # note: we enable enable_output_value_rounding by default as
-    #       - for sacrificing a few satoshis
-    #       + it gives better privacy for the user re change output
-    #       + it also helps the network as a whole as fees will become noisier
-    #         (trying to counter the heuristic that "whole integer sat/byte feerates" are common)
-    coinchooser = klass(
-        enable_output_value_rounding=config.get('coin_chooser_output_rounding', True),
+    return klass(
+        enable_output_value_rounding=config.get(
+            'coin_chooser_output_rounding', True
+        ),
     )
-    return coinchooser

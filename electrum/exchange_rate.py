@@ -97,7 +97,7 @@ class ExchangeBase(Logger):
         self.on_quotes()
 
     def read_historical_rates(self, ccy: str, cache_dir: str) -> Optional[dict]:
-        filename = os.path.join(cache_dir, self.name() + '_'+ ccy)
+        filename = os.path.join(cache_dir, f'{self.name()}_{ccy}')
         if not os.path.exists(filename):
             return None
         timestamp = os.stat(filename).st_mtime
@@ -129,7 +129,7 @@ class ExchangeBase(Logger):
             return
         # cast rates to str
         h = {date_str: str(rate) for (date_str, rate) in h.items()}
-        filename = os.path.join(cache_dir, self.name() + '_' + ccy)
+        filename = os.path.join(cache_dir, f'{self.name()}_{ccy}')
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(json.dumps(h))
         h['timestamp'] = time.time()
@@ -186,7 +186,7 @@ class Yadio(ExchangeBase):
         return list(dicts.keys())
 
     async def get_rates(self, ccy: str) -> Mapping[str, Optional[Decimal]]:
-        json = await self.get_json('api.yadio.io', '/rate/%s/BTC' % ccy)
+        json = await self.get_json('api.yadio.io', f'/rate/{ccy}/BTC')
         return {ccy: to_decimal(json['rate'])}
 
 class BitcoinAverage(ExchangeBase):
@@ -220,7 +220,7 @@ class BitcoinVenezuela(ExchangeBase):
     async def request_history(self, ccy):
         json = await self.get_json('api.bitcoinvenezuela.com',
                              "/historical/index.php?coin=BTC")
-        return json[ccy +'_BTC']
+        return json[f'{ccy}_BTC']
 
 
 class Bitbank(ExchangeBase):
@@ -318,10 +318,10 @@ class CoinDesk(ExchangeBase):
         return [d['currency'] for d in dicts]
 
     async def get_rates(self, ccy):
-        json = await self.get_json('api.coindesk.com',
-                             '/v1/bpi/currentprice/%s.json' % ccy)
-        result = {ccy: to_decimal(json['bpi'][ccy]['rate_float'])}
-        return result
+        json = await self.get_json(
+            'api.coindesk.com', f'/v1/bpi/currentprice/{ccy}.json'
+        )
+        return {ccy: to_decimal(json['bpi'][ccy]['rate_float'])}
 
     def history_starts(self):
         return {'USD': '2012-11-30', 'EUR': '2013-09-01'}
@@ -331,10 +331,9 @@ class CoinDesk(ExchangeBase):
 
     async def request_history(self, ccy):
         start = self.history_starts()[ccy]
-        end = datetime.today().strftime('%Y-%m-%d')
+        end = datetime.now().strftime('%Y-%m-%d')
         # Note ?currency and ?index don't work as documented.  Sigh.
-        query = ('/v1/bpi/historical/close.json?start=%s&end=%s'
-                 % (start, end))
+        query = f'/v1/bpi/historical/close.json?start={start}&end={end}'
         json = await self.get_json('api.coindesk.com', query)
         return json['bpi']
 
@@ -351,8 +350,10 @@ class CoinGecko(ExchangeBase):
         return CURRENCIES[self.name()]
 
     async def request_history(self, ccy):
-        history = await self.get_json('api.coingecko.com',
-                                      '/api/v3/coins/bitcoin/market_chart?vs_currency=%s&days=max' % ccy)
+        history = await self.get_json(
+            'api.coingecko.com',
+            f'/api/v3/coins/bitcoin/market_chart?vs_currency={ccy}&days=max',
+        )
 
         return dict([(datetime.utcfromtimestamp(h[0]/1000).strftime('%Y-%m-%d'), str(h[1]))
                      for h in history['prices']])
@@ -369,7 +370,7 @@ class itBit(ExchangeBase):
 
     async def get_rates(self, ccy):
         ccys = ['USD', 'EUR', 'SGD']
-        json = await self.get_json('api.itbit.com', '/v1/markets/XBT%s/ticker' % ccy)
+        json = await self.get_json('api.itbit.com', f'/v1/markets/XBT{ccy}/ticker')
         result = dict.fromkeys(ccys)
         if ccy in ccys:
             result[ccy] = to_decimal(json['lastPrice'])
@@ -380,11 +381,11 @@ class Kraken(ExchangeBase):
 
     async def get_rates(self, ccy):
         ccys = ['EUR', 'USD', 'CAD', 'GBP', 'JPY']
-        pairs = ['XBT%s' % c for c in ccys]
-        json = await self.get_json('api.kraken.com',
-                             '/0/public/Ticker?pair=%s' % ','.join(pairs))
-        return dict((k[-3:], to_decimal(v['c'][0]))
-                     for k, v in json['result'].items())
+        pairs = [f'XBT{c}' for c in ccys]
+        json = await self.get_json(
+            'api.kraken.com', f"/0/public/Ticker?pair={','.join(pairs)}"
+        )
+        return {k[-3:]: to_decimal(v['c'][0]) for k, v in json['result'].items()}
 
 
 class LocalBitcoins(ExchangeBase):
@@ -641,14 +642,18 @@ class FxThread(ThreadJob, EventListener):
             rate = self.exchange_rate()
         else:
             rate = self.timestamp_rate(timestamp)
-        return '' if rate.is_nan() else "%s" % self.value_str(btc_balance, rate)
+        return '' if rate.is_nan() else f"{self.value_str(btc_balance, rate)}"
 
     def format_amount_and_units(self, btc_balance, *, timestamp: int = None) -> str:
         if timestamp is None:
             rate = self.exchange_rate()
         else:
             rate = self.timestamp_rate(timestamp)
-        return '' if rate.is_nan() else "%s %s" % (self.value_str(btc_balance, rate), self.ccy)
+        return (
+            ''
+            if rate.is_nan()
+            else f"{self.value_str(btc_balance, rate)} {self.ccy}"
+        )
 
     def get_fiat_status_text(self, btc_balance, base_unit, decimal_point):
         rate = self.exchange_rate()
@@ -675,7 +680,7 @@ class FxThread(ThreadJob, EventListener):
         rate = self.exchange.historical_rate(self.ccy, d_t)
         # Frequently there is no rate for today, until tomorrow :)
         # Use spot quotes in that case
-        if rate.is_nan() and (datetime.today().date() - d_t.date()).days <= 2:
+        if rate.is_nan() and (datetime.now().date() - d_t.date()).days <= 2:
             rate = self.exchange.get_cached_spot_quote(self.ccy)
             self.history_used_spot = True
         if rate is None:
