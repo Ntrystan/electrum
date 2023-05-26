@@ -81,7 +81,7 @@ class WalletStorage(Logger):
 
     def write(self, data: str) -> None:
         s = self.encrypt_before_writing(data)
-        temp_path = "%s.tmp.%s" % (self.path, os.getpid())
+        temp_path = f"{self.path}.tmp.{os.getpid()}"
         with open(temp_path, "w", encoding='utf-8') as f:
             f.write(s)
             f.flush()
@@ -135,7 +135,7 @@ class WalletStorage(Logger):
 
     def _init_encryption_version(self):
         try:
-            magic = base64.b64decode(self.raw)[0:4]
+            magic = base64.b64decode(self.raw)[:4]
             if magic == b'BIE1':
                 return StorageEncryptionVersion.USER_PASSWORD
             elif magic == b'BIE2':
@@ -150,8 +150,7 @@ class WalletStorage(Logger):
         if password is None:
             password = ""
         secret = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), b'', iterations=1024)
-        ec_key = ecc.ECPrivkey.from_arbitrary_size_secret(secret)
-        return ec_key
+        return ecc.ECPrivkey.from_arbitrary_size_secret(secret)
 
     def _get_encryption_magic(self):
         v = self._encryption_version
@@ -160,7 +159,7 @@ class WalletStorage(Logger):
         elif v == StorageEncryptionVersion.XPUB_PASSWORD:
             return b'BIE2'
         else:
-            raise WalletFileException('no encryption magic for version: %s' % v)
+            raise WalletFileException(f'no encryption magic for version: {v}')
 
     def decrypt(self, password) -> None:
         """Raises an InvalidPassword exception on invalid password"""

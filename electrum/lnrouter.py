@@ -111,9 +111,7 @@ class RouteEdge(PathEdge):
         if self.cltv_expiry_delta > 14 * 144:
             return False
         total_fee = self.fee_for_edge(amount_msat)
-        if not is_fee_sane(total_fee, payment_amount_msat=amount_msat):
-            return False
-        return True
+        return bool(is_fee_sane(total_fee, payment_amount_msat=amount_msat))
 
     def has_feature_varonion(self) -> bool:
         features = LnFeatures(self.node_features)
@@ -153,19 +151,12 @@ def is_route_sane_to_use(route: LNPaymentRoute, invoice_amount_msat: int, min_fi
     # TODO revise ad-hoc heuristics
     if cltv > NBLOCK_CLTV_EXPIRY_TOO_FAR_INTO_FUTURE:
         return False
-    if not is_fee_sane(total_fee, payment_amount_msat=invoice_amount_msat):
-        return False
-    return True
+    return bool(is_fee_sane(total_fee, payment_amount_msat=invoice_amount_msat))
 
 
 def is_fee_sane(fee_msat: int, *, payment_amount_msat: int) -> bool:
     # fees <= 5 sat are fine
-    if fee_msat <= 5_000:
-        return True
-    # fees <= 1 % of payment are fine
-    if 100 * fee_msat <= payment_amount_msat:
-        return True
-    return False
+    return True if fee_msat <= 5_000 else 100 * fee_msat <= payment_amount_msat
 
 
 class LiquidityHint:
@@ -362,15 +353,13 @@ class LiquidityHintMgr:
         was chosen such that the penalty will be able to compete with the regular
         base and relative fees.
         """
-        # we only evaluate hints here, so use dict get (to not create many hints with self.get_hint)
-        hint = self._liquidity_hints.get(channel_id)
-        if not hint:
-            can_send, cannot_send, num_inflight_htlcs = None, None, 0
-        else:
+        if hint := self._liquidity_hints.get(channel_id):
             can_send = hint.can_send(node_from < node_to)
             cannot_send = hint.cannot_send(node_from < node_to)
             num_inflight_htlcs = hint.num_inflight_htlcs(node_from < node_to)
 
+        else:
+            can_send, cannot_send, num_inflight_htlcs = None, None, 0
         if cannot_send is not None and amount >= cannot_send:
             return inf
         if can_send is not None and amount <= can_send:
@@ -388,7 +377,11 @@ class LiquidityHintMgr:
     @with_lock
     def get_blacklist(self) -> Set[ShortChannelID]:
         now = int(time.time())
-        return set(k for k, v in self._liquidity_hints.items() if now - v.blacklist_timestamp < BLACKLIST_DURATION)
+        return {
+            k
+            for k, v in self._liquidity_hints.items()
+            if now - v.blacklist_timestamp < BLACKLIST_DURATION
+        }
 
     @with_lock
     def clear_blacklist(self):
@@ -682,7 +675,6 @@ class LNPathFinder(Logger):
             my_sending_channels: Dict[ShortChannelID, 'Channel'] = None,
             private_route_edges: Dict[ShortChannelID, RouteEdge] = None,
     ) -> Optional[LNPaymentRoute]:
-        route = None
         if not path:
             path = self.find_path_for_payment(
                 nodeA=nodeA,
@@ -690,7 +682,12 @@ class LNPathFinder(Logger):
                 invoice_amount_msat=invoice_amount_msat,
                 my_sending_channels=my_sending_channels,
                 private_route_edges=private_route_edges)
-        if path:
-            route = self.create_route_from_path(
-                path, my_channels=my_sending_channels, private_route_edges=private_route_edges)
-        return route
+        return (
+            self.create_route_from_path(
+                path,
+                my_channels=my_sending_channels,
+                private_route_edges=private_route_edges,
+            )
+            if path
+            else None
+        )

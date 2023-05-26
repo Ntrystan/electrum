@@ -45,12 +45,11 @@ def load_library():
         libnames = ['libsecp256k1.so', ]
     else:  # desktop Linux and similar
         libnames = ['libsecp256k1.so.1', 'libsecp256k1.so.0', ]
-    library_paths = []
-    for libname in libnames:  # try local files in repo dir first
-        library_paths.append(os.path.join(os.path.dirname(__file__), libname))
-    for libname in libnames:
-        library_paths.append(libname)
-
+    library_paths = [
+        os.path.join(os.path.dirname(__file__), libname)
+        for libname in libnames
+    ]
+    library_paths.extend(iter(libnames))
     exceptions = []
     secp256k1 = None
     for libpath in library_paths:
@@ -139,7 +138,7 @@ except BaseException as e:
 
 if _libsecp256k1 is None:
     # hard fail:
-    sys.exit(f"Error: Failed to load libsecp256k1.")
+    sys.exit("Error: Failed to load libsecp256k1.")
 
 
 def version_info() -> dict:

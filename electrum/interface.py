@@ -145,17 +145,15 @@ class NotificationSession(RPCSession):
     async def handle_request(self, request):
         self.maybe_log(f"--> {request}")
         try:
-            if isinstance(request, Notification):
-                params, result = request.args[:-1], request.args[-1]
-                key = self.get_hashable_key_for_rpc_call(request.method, params)
-                if key in self.subscriptions:
-                    self.cache[key] = result
-                    for queue in self.subscriptions[key]:
-                        await queue.put(request.args)
-                else:
-                    raise Exception(f'unexpected notification')
-            else:
-                raise Exception(f'unexpected request. not a notification')
+            if not isinstance(request, Notification):
+                raise Exception('unexpected request. not a notification')
+            params, result = request.args[:-1], request.args[-1]
+            key = self.get_hashable_key_for_rpc_call(request.method, params)
+            if key not in self.subscriptions:
+                raise Exception('unexpected notification')
+            self.cache[key] = result
+            for queue in self.subscriptions[key]:
+                await queue.put(request.args)
         except Exception as e:
             self.interface.logger.info(f"error handling request {request}. exc: {repr(e)}")
             await self.close()
@@ -294,7 +292,7 @@ class ServerAddr:
     def from_str(cls, s: str) -> 'ServerAddr':
         """Constructs a ServerAddr or raises ValueError."""
         # host might be IPv6 address, hence do rsplit:
-        host, port, protocol = str(s).rsplit(':', 2)
+        host, port, protocol = s.rsplit(':', 2)
         return ServerAddr(host=host, port=port, protocol=protocol)
 
     @classmethod
@@ -315,10 +313,7 @@ class ServerAddr:
             return None  # although maybe we could guess the port too?
         host = host or items[0]
         port = items[1]
-        if len(items) >= 3:
-            protocol = items[2]
-        else:
-            protocol = PREFERRED_NETWORK_PROTOCOL
+        protocol = items[2] if len(items) >= 3 else PREFERRED_NETWORK_PROTOCOL
         try:
             return ServerAddr(host=host, port=port, protocol=protocol)
         except ValueError:
@@ -326,12 +321,10 @@ class ServerAddr:
 
     def to_friendly_name(self) -> str:
         # note: this method is closely linked to from_str_with_inference
-        if self.protocol == 's':  # hide trailing ":s"
-            return self.net_addr_str()
-        return str(self)
+        return self.net_addr_str() if self.protocol == 's' else str(self)
 
     def __str__(self):
-        return '{}:{}'.format(self.net_addr_str(), self.protocol)
+        return f'{self.net_addr_str()}:{self.protocol}'
 
     def to_json(self) -> str:
         return str(self)
@@ -390,7 +383,7 @@ class Interface(Logger):
         #   note: we could maybe relax this further and bypass the proxy for all private
         #         addresses...? e.g. 192.168.x.x
         if util.is_localhost(server.host):
-            self.logger.info(f"looks like localhost: not using proxy for this server")
+            self.logger.info("looks like localhost: not using proxy for this server")
             proxy = None
         self.proxy = MySocksProxy.from_proxy_dict(proxy)
 
@@ -411,6 +404,7 @@ class Interface(Logger):
         async def spawn_task():
             task = await self.network.taskgroup.spawn(self.run())
             task.set_name(f"interface::{str(server)}")
+
         asyncio.run_coroutine_threadsafe(spawn_task(), self.network.asyncio_loop)
 
     @property
@@ -555,10 +549,7 @@ class Interface(Logger):
 
         assert self.tip_header
         chain = blockchain.check_header(self.tip_header)
-        if not chain:
-            self.blockchain = blockchain.get_best_chain()
-        else:
-            self.blockchain = chain
+        self.blockchain = blockchain.get_best_chain() if not chain else chain
         assert self.blockchain is not None
 
         self.logger.info(f"set blockchain with height {self.blockchain.height()}")
@@ -569,27 +560,28 @@ class Interface(Logger):
         return self.ready.done() and not self.got_disconnected.is_set()
 
     async def _save_certificate(self) -> None:
-        if not os.path.exists(self.cert_path):
-            # we may need to retry this a few times, in case the handshake hasn't completed
-            for _ in range(10):
-                dercert = await self._fetch_certificate()
-                if dercert:
-                    self.logger.info("succeeded in getting cert")
-                    self._verify_certificate_fingerprint(dercert)
-                    with open(self.cert_path, 'w') as f:
-                        cert = ssl.DER_cert_to_PEM_cert(dercert)
-                        # workaround android bug
-                        cert = re.sub("([^\n])-----END CERTIFICATE-----","\\1\n-----END CERTIFICATE-----",cert)
-                        f.write(cert)
-                        # even though close flushes, we can't fsync when closed.
-                        # and we must flush before fsyncing, cause flush flushes to OS buffer
-                        # fsync writes to OS buffer to disk
-                        f.flush()
-                        os.fsync(f.fileno())
-                    break
-                await asyncio.sleep(1)
-            else:
-                raise GracefulDisconnect("could not get certificate after 10 tries")
+        if os.path.exists(self.cert_path):
+            return
+        # we may need to retry this a few times, in case the handshake hasn't completed
+        for _ in range(10):
+            dercert = await self._fetch_certificate()
+            if dercert:
+                self.logger.info("succeeded in getting cert")
+                self._verify_certificate_fingerprint(dercert)
+                with open(self.cert_path, 'w') as f:
+                    cert = ssl.DER_cert_to_PEM_cert(dercert)
+                    # workaround android bug
+                    cert = re.sub("([^\n])-----END CERTIFICATE-----","\\1\n-----END CERTIFICATE-----",cert)
+                    f.write(cert)
+                    # even though close flushes, we can't fsync when closed.
+                    # and we must flush before fsyncing, cause flush flushes to OS buffer
+                    # fsync writes to OS buffer to disk
+                    f.flush()
+                    os.fsync(f.fileno())
+                break
+            await asyncio.sleep(1)
+        else:
+            raise GracefulDisconnect("could not get certificate after 10 tries")
 
     async def _fetch_certificate(self) -> bytes:
         sslc = ssl.SSLContext(protocol=ssl.PROTOCOL_TLS_CLIENT)
@@ -656,9 +648,7 @@ class Interface(Logger):
         if res['count'] != size:
             raise RequestCorrupted(f"expected {size} headers but only got {res['count']}")
         conn = self.blockchain.connect_chunk(index, res['hex'])
-        if not conn:
-            return conn, 0
-        return conn, res['count']
+        return (conn, 0) if not conn else (conn, res['count'])
 
     def is_main_server(self) -> bool:
         return (self.network.interface == self or
@@ -859,7 +849,7 @@ class Interface(Logger):
         mock = 'mock' in bad_header and bad_header['mock']['connect'](height)
         real = not mock and self.blockchain.can_connect(bad_header, check_height=False)
         if not real and not mock:
-            raise Exception('unexpected bad header during binary: {}'.format(bad_header))
+            raise Exception(f'unexpected bad header during binary: {bad_header}')
         _assert_header_does_not_check_against_any_chain(bad_header)
 
         self.logger.info(f"binary search exited. good {good}, bad {bad}")
@@ -929,8 +919,7 @@ class Interface(Logger):
         session = self.session
         if not session: return None
         peer_addr = session.remote_address()
-        if not peer_addr: return None
-        return str(peer_addr.host)
+        return None if not peer_addr else str(peer_addr.host)
 
     def bucket_based_on_ipaddress(self) -> str:
         def do_bucket():
@@ -1008,10 +997,9 @@ class Interface(Logger):
                 assert_dict_contains_field(tx_item, field_name='fee')
                 assert_non_negative_integer(tx_item['fee'])
                 prev_height = float("inf")  # this ensures confirmed txs can't follow mempool txs
+            elif height < prev_height:
+                raise RequestCorrupted('heights of confirmed txs must be in increasing order')
             else:
-                # check monotonicity of heights
-                if height < prev_height:
-                    raise RequestCorrupted(f'heights of confirmed txs must be in increasing order')
                 prev_height = height
         hashes = set(map(lambda item: item['tx_hash'], res))
         if len(hashes) != len(res):
@@ -1083,7 +1071,7 @@ class Interface(Logger):
             assert_non_negative_int_or_float(fee)
             assert_non_negative_integer(s)
             if fee >= prev_fee:  # check monotonicity
-                raise RequestCorrupted(f'fees must be in decreasing order')
+                raise RequestCorrupted('fees must be in decreasing order')
             prev_fee = fee
         return res
 
@@ -1115,8 +1103,7 @@ class Interface(Logger):
         # check response
         assert_non_negative_int_or_float(res)
         relayfee = int(res * bitcoin.COIN)
-        relayfee = max(0, relayfee)
-        return relayfee
+        return max(0, relayfee)
 
     async def get_estimatefee(self, num_blocks: int) -> int:
         """Returns a feerate estimate for getting confirmed within
@@ -1170,10 +1157,7 @@ def check_cert(host, cert):
 
 # Used by tests
 def _match_hostname(name, val):
-    if val == name:
-        return True
-
-    return val.startswith('*.') and name.endswith(val[1:])
+    return True if val == name else val.startswith('*.') and name.endswith(val[1:])
 
 
 def test_certificates():

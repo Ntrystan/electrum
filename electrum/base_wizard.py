@@ -404,7 +404,7 @@ class BaseWizard(Logger):
                     client.clear_session()
                 raise
         else:
-            raise Exception('unknown purpose: %s' % purpose)
+            raise Exception(f'unknown purpose: {purpose}')
 
     def derivation_and_script_type_dialog(self, f, *, get_account_xpub=None):
         message1 = _('Choose the type of addresses in your wallet.')
@@ -413,11 +413,11 @@ class BaseWizard(Logger):
             _('If you are not sure what this is, leave this field unchanged.')
         ])
         hide_choices = False
+        # There is no general standard for HD multisig.
+        # For legacy, this is partially compatible with BIP45; assumes index=0
+        # For segwit, a custom path is used, as there is no standard at all.
+        default_choice_idx = 2
         if self.wallet_type == 'multisig':
-            # There is no general standard for HD multisig.
-            # For legacy, this is partially compatible with BIP45; assumes index=0
-            # For segwit, a custom path is used, as there is no standard at all.
-            default_choice_idx = 2
             choices = [
                 ('standard',   'legacy multisig (p2sh)',            normalize_bip32_derivation("m/45'/0")),
                 ('p2wsh-p2sh', 'p2sh-segwit multisig (p2wsh-p2sh)', purpose48_derivation(0, xtype='p2wsh-p2sh')),
@@ -432,7 +432,6 @@ class BaseWizard(Logger):
                 default_choice_idx = chosen_idx
                 hide_choices = True
         else:
-            default_choice_idx = 2
             choices = [
                 ('standard',    'legacy (p2pkh)',            bip44_derivation(0, bip43_purpose=44)),
                 ('p2wpkh-p2sh', 'p2sh-segwit (p2wpkh-p2sh)', bip44_derivation(0, bip43_purpose=49)),
@@ -575,7 +574,7 @@ class BaseWizard(Logger):
             t1 = xpub_type(k.xpub)
         if self.wallet_type == 'standard':
             if has_xpub and t1 not in ['standard', 'p2wpkh', 'p2wpkh-p2sh']:
-                self.show_error(_('Wrong key type') + ' %s'%t1)
+                self.show_error(_('Wrong key type') + f' {t1}')
                 self.run('choose_keystore')
                 return
             self.keystores.append(k)
@@ -583,7 +582,7 @@ class BaseWizard(Logger):
         elif self.wallet_type == 'multisig':
             assert has_xpub
             if t1 not in ['standard', 'p2wsh', 'p2wsh-p2sh']:
-                self.show_error(_('Wrong key type') + ' %s'%t1)
+                self.show_error(_('Wrong key type') + f' {t1}')
                 self.run('choose_keystore')
                 return
             if k.xpub in map(lambda x: x.xpub, self.keystores):
@@ -593,7 +592,11 @@ class BaseWizard(Logger):
             if len(self.keystores)>0:
                 t2 = xpub_type(self.keystores[0].xpub)
                 if t1 != t2:
-                    self.show_error(_('Cannot add this cosigner:') + '\n' + "Their key type is '%s', we are '%s'"%(t1, t2))
+                    self.show_error(
+                        _('Cannot add this cosigner:')
+                        + '\n'
+                        + f"Their key type is '{t1}', we are '{t2}'"
+                    )
                     self.run('choose_keystore')
                     return
             if len(self.keystores) == 0:
@@ -674,7 +677,7 @@ class BaseWizard(Logger):
     def create_storage(self, path) -> Tuple[WalletStorage, WalletDB]:
         if os.path.exists(path):
             raise Exception('file already exists at path')
-        assert self.pw_args, f"pw_args not set?!"
+        assert self.pw_args, "pw_args not set?!"
         pw_args = self.pw_args
         self.pw_args = None  # clean-up so that it can get GC-ed
         storage = WalletStorage(path)

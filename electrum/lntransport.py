@@ -128,8 +128,7 @@ class LNTransportBase:
                     if len(buffer) >= offset:
                         c = bytes(buffer[18:offset])
                         del buffer[:offset]  # much faster than: buffer=buffer[offset:]
-                        msg = aead_decrypt(rk_m, rn_m, b'', c)
-                        yield msg
+                        yield aead_decrypt(rk_m, rn_m, b'', c)
                         break
                 try:
                     s = await self.reader.read(2**10)
@@ -191,7 +190,7 @@ class LNResponderTransport(LNTransportBase):
                 raise HandshakeFailed('responder disconnected')
             act1 += buf
         if len(act1) != 50:
-            raise HandshakeFailed('responder: short act 1 read, length is ' + str(len(act1)))
+            raise HandshakeFailed(f'responder: short act 1 read, length is {len(act1)}')
         if bytes([act1[0]]) != HandshakeState.handshake_version:
             raise HandshakeFailed('responder: bad handshake version in act 1')
         c = act1[-16:]
@@ -222,7 +221,7 @@ class LNResponderTransport(LNTransportBase):
                 raise HandshakeFailed('responder disconnected')
             act3 += buf
         if len(act3) != 66:
-            raise HandshakeFailed('responder: short act 3 read, length is ' + str(len(act3)))
+            raise HandshakeFailed(f'responder: short act 3 read, length is {len(act3)}')
         if bytes([act3[0]]) != HandshakeState.handshake_version:
             raise HandshakeFailed('responder: bad handshake version in act 3')
         c = act3[1:50]
@@ -269,7 +268,7 @@ class LNTransport(LNTransportBase):
                                   f"are you sure this is the right pubkey? {self.peer_addr}")
         hver, alice_epub, tag = rspns[0], rspns[1:34], rspns[34:]
         if bytes([hver]) != hs.handshake_version:
-            raise HandshakeFailed("unexpected handshake version: {}".format(hver))
+            raise HandshakeFailed(f"unexpected handshake version: {hver}")
         # act 2
         hs.update(alice_epub)
         ss = get_ecdh(epriv, alice_epub)

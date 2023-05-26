@@ -19,7 +19,7 @@ files = subprocess.check_output(cmd, shell=True)
 with open("app.fil", "wb") as f:
     f.write(files)
 
-print("Found {} files to translate".format(len(files.splitlines())))
+print(f"Found {len(files.splitlines())} files to translate")
 
 # Generate fresh translation template
 if not os.path.exists('electrum/locale'):
@@ -36,7 +36,7 @@ files = subprocess.check_output(cmd, shell=True)
 with open("electrum/locale/qml.lst", "wb") as f:
     f.write(files)
 
-print("Found {} QML files to translate".format(len(files.splitlines())))
+print(f"Found {len(files.splitlines())} QML files to translate")
 
 cmd = "lupdate @electrum/locale/qml.lst -ts electrum/locale/qml.ts"
 print('Collecting strings')
@@ -73,11 +73,11 @@ crowdin_project_id = 20482  # for "Electrum" project on crowdin
 locale_file_name = "locale/messages.pot"
 crowdin_file_name = "messages.pot"
 crowdin_file_id = 68  # for "/electrum-client/messages.pot"
-global_headers = {"Authorization": "Bearer {}".format(crowdin_api_key)}
+global_headers = {"Authorization": f"Bearer {crowdin_api_key}"}
 
 # client.storages.add_storage(f)
-print(f"Uploading to temp storage...")
-url = f'https://api.crowdin.com/api/v2/storages'
+print("Uploading to temp storage...")
+url = 'https://api.crowdin.com/api/v2/storages'
 with open(locale_file_name, 'rb') as f:
     headers = {**global_headers, **{"Crowdin-API-FileName": crowdin_file_name}}
     response = requests.request("POST", url, data=f, headers=headers)
@@ -85,14 +85,14 @@ with open(locale_file_name, 'rb') as f:
     storage_id = response.json()["data"]["id"]
 
 # client.source_files.update_file(projectId=crowdin_project_id, storageId=storage_id, fileId=crowdin_file_id)
-print(f"Copying from temp storage and updating file in perm storage...")
+print("Copying from temp storage and updating file in perm storage...")
 url = f'https://api.crowdin.com/api/v2/projects/{crowdin_project_id}/files/{crowdin_file_id}'
 headers = {**global_headers, **{"content-type": "application/json"}}
 response = requests.request("PUT", url, json={"storageId": storage_id}, headers=headers)
 print("", "source_files.update_file:", "-" * 20, response.text, "-" * 20, sep="\n")
 
 # client.translations.build_crowdin_project_translation(projectId=crowdin_project_id)
-print(f"Rebuilding translations...")
+print("Rebuilding translations...")
 url = f'https://api.crowdin.com/api/v2/projects/{crowdin_project_id}/translations/builds'
 headers = {**global_headers, **{"content-type": "application/json"}}
 response = requests.request("POST", url, headers=headers)

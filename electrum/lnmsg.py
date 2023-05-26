@@ -80,7 +80,7 @@ def read_bigsize_int(fd: io.BytesIO) -> Optional[int]:
         if len(buf) != 8:
             raise UnexpectedEndOfStream()
         val = int.from_bytes(buf, byteorder="big", signed=False)
-        if not (0x1_0000_0000 <= val):
+        if val < 0x1_0000_0000:
             raise FieldEncodingNotMinimal()
         return val
     raise Exception()
@@ -92,16 +92,14 @@ def _read_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str]) -> U
     if not fd: raise Exception()
     if isinstance(count, int):
         assert count >= 0, f"{count!r} must be non-neg int"
-    elif count == "...":
-        pass
-    else:
+    elif count != "...":
         raise Exception(f"unexpected field count: {count!r}")
     if count == 0:
         return b""
     type_len = None
     if field_type == 'byte':
         type_len = 1
-    elif field_type in ('u8', 'u16', 'u32', 'u64'):
+    elif field_type in {'u8', 'u16', 'u32', 'u64'}:
         if field_type == 'u8':
             type_len = 1
         elif field_type == 'u16':
@@ -116,7 +114,7 @@ def _read_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str]) -> U
         if len(buf) != type_len:
             raise UnexpectedEndOfStream()
         return int.from_bytes(buf, byteorder="big", signed=False)
-    elif field_type in ('tu16', 'tu32', 'tu64'):
+    elif field_type in {'tu16', 'tu32', 'tu64'}:
         if field_type == 'tu16':
             type_len = 2
         elif field_type == 'tu32':
@@ -150,9 +148,9 @@ def _read_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str]) -> U
 
     if count == "...":
         total_len = -1  # read all
+    elif type_len is None:
+        raise UnknownMsgFieldType(f"unknown field type: {field_type!r}")
     else:
-        if type_len is None:
-            raise UnknownMsgFieldType(f"unknown field type: {field_type!r}")
         total_len = count * type_len
 
     buf = fd.read(total_len)
@@ -167,9 +165,7 @@ def _write_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str],
     if not fd: raise Exception()
     if isinstance(count, int):
         assert count >= 0, f"{count!r} must be non-neg int"
-    elif count == "...":
-        pass
-    else:
+    elif count != "...":
         raise Exception(f"unexpected field count: {count!r}")
     if count == 0:
         return
@@ -184,7 +180,7 @@ def _write_field(*, fd: io.BytesIO, field_type: str, count: Union[int, str],
         type_len = 4
     elif field_type == 'u64':
         type_len = 8
-    elif field_type in ('tu16', 'tu32', 'tu64'):
+    elif field_type in {'tu16', 'tu32', 'tu64'}:
         if field_type == 'tu16':
             type_len = 2
         elif field_type == 'tu32':
@@ -261,7 +257,7 @@ def _resolve_field_count(field_count_str: str, *, vars_dict: dict, allow_any=Fal
     """Returns an evaluated field count, typically an int.
     If allow_any is True, the return value can be a str with value=="...".
     """
-    if field_count_str == "":
+    if not field_count_str:
         field_count = 1
     elif field_count_str == "...":
         if not allow_any:
@@ -348,8 +344,6 @@ class LNSerializer:
                     assert tlv_stream_name == row[1]
                     assert tlv_record_name == row[2]
                     self.in_tlv_stream_get_tlv_record_scheme_from_type[tlv_stream_name][tlv_record_type].append(tuple(row))
-                else:
-                    pass  # TODO
 
     def write_tlv_stream(self, *, fd: io.BytesIO, tlv_stream_name: str, **kwargs) -> None:
         scheme_map = self.in_tlv_stream_get_tlv_record_scheme_from_type[tlv_stream_name]

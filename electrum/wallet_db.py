@@ -326,12 +326,11 @@ class WalletDB(JsonDB):
         if self.get('wallet_type') == 'standard':
             if self.get('keystore').get('type') == 'imported':
                 pubkeys = self.get('keystore').get('keypairs').keys()
-                d = {'change': []}
                 receiving_addresses = []
                 for pubkey in pubkeys:
                     addr = bitcoin.pubkey_to_address('p2pkh', pubkey)
                     receiving_addresses.append(addr)
-                d['receiving'] = receiving_addresses
+                d = {'change': [], 'receiving': receiving_addresses}
                 self.put('addresses', d)
                 self.put('pubkeys', None)
 
@@ -404,15 +403,12 @@ class WalletDB(JsonDB):
         if self.get('wallet_type') == 'imported':
             addresses = self.get('addresses')
             assert isinstance(addresses, dict)
-            addresses_new = dict()
+            addresses_new = {}
             for address, details in addresses.items():
                 if not bitcoin.is_address(address):
                     remove_address(address)
                     continue
-                if details is None:
-                    addresses_new[address] = {}
-                else:
-                    addresses_new[address] = details
+                addresses_new[address] = {} if details is None else details
             self.put('addresses', addresses_new)
 
         self.put('seed_version', 16)
@@ -461,7 +457,7 @@ class WalletDB(JsonDB):
         from .bip32 import BIP32Node, convert_bip32_intpath_to_strpath
         # note: This upgrade method reimplements bip32.root_fp_and_der_prefix_from_xkey.
         #       This is done deliberately, to avoid introducing that method as a dependency to this upgrade.
-        for ks_name in ('keystore', *['x{}/'.format(i) for i in range(1, 16)]):
+        for ks_name in ('keystore', *[f'x{i}/' for i in range(1, 16)]):
             ks = self.get(ks_name, None)
             if ks is None: continue
             xpub = ks.get('xpub', None)
@@ -495,8 +491,7 @@ class WalletDB(JsonDB):
     def _convert_version_21(self):
         if not self._is_upgrade_method_needed(20, 20):
             return
-        channels = self.get('channels')
-        if channels:
+        if channels := self.get('channels'):
             for channel in channels:
                 channel['state'] = 'OPENING'
             self.put('channels', channels)
@@ -534,13 +529,14 @@ class WalletDB(JsonDB):
             log = c.get('log', {})
             for sub in LOCAL, REMOTE:
                 l = log[str(sub)]['fee_updates']
-                d = {}
-                for i, fu in enumerate(l):
-                    d[str(i)] = {
-                        'rate':fu['rate'],
-                        'ctn_local':fu['ctns'][str(LOCAL)],
-                        'ctn_remote':fu['ctns'][str(REMOTE)]
+                d = {
+                    str(i): {
+                        'rate': fu['rate'],
+                        'ctn_local': fu['ctns'][str(LOCAL)],
+                        'ctn_remote': fu['ctns'][str(REMOTE)],
                     }
+                    for i, fu in enumerate(l)
+                }
                 log[str(int(sub))]['fee_updates'] = d
         self.data['channels'] = channels
 
@@ -565,20 +561,12 @@ class WalletDB(JsonDB):
         # convert txi & txo
         txi = self.get('txi', {})
         for tx_hash, d in list(txi.items()):
-            d2 = {}
-            for addr, l in d.items():
-                d2[addr] = {}
-                for ser, v in l:
-                    d2[addr][ser] = v
+            d2 = {addr: dict(l) for addr, l in d.items()}
             txi[tx_hash] = d2
         self.data['txi'] = txi
         txo = self.get('txo', {})
         for tx_hash, d in list(txo.items()):
-            d2 = {}
-            for addr, l in d.items():
-                d2[addr] = {}
-                for n, v, cb in l:
-                    d2[addr][str(n)] = (v, cb)
+            d2 = {addr: {str(n): (v, cb) for n, v, cb in l} for addr, l in d.items()}
             txo[tx_hash] = d2
         self.data['txo'] = txo
 
@@ -607,7 +595,7 @@ class WalletDB(JsonDB):
         invoices = self.data.get('invoices', {})
         for k, r in list(invoices.items()):
             data = r.get("hex")
-            pr_id = sha256(bytes.fromhex(data))[0:16].hex()
+            pr_id = sha256(bytes.fromhex(data))[:16].hex()
             if pr_id != k:
                 continue
             del invoices[k]
@@ -619,8 +607,7 @@ class WalletDB(JsonDB):
         channels = self.data.get('channels', {})
         channel_timestamps = self.data.pop('lightning_channel_timestamps', {})
         for channel_id, c in channels.items():
-            item = channel_timestamps.get(channel_id)
-            if item:
+            if item := channel_timestamps.get(channel_id):
                 funding_txid, funding_height, funding_timestamp, closing_txid, closing_height, closing_timestamp = item
                 if funding_txid:
                     c['funding_height'] = funding_txid, funding_height, funding_timestamp
@@ -661,22 +648,21 @@ class WalletDB(JsonDB):
                     'time': r.get('time', 0),
                 }
                 if _type == PR_TYPE_ONCHAIN:
-                    address = r.pop('address', None)
-                    if address:
+                    if address := r.pop('address', None):
                         outputs = [(0, address, r.get('amount'))]
                     else:
                         outputs = r.get('outputs')
-                    item.update({
+                    item |= {
                         'outputs': outputs,
                         'id': r.get('id'),
                         'bip70': r.get('bip70'),
                         'requestor': r.get('requestor'),
-                    })
+                    }
                 else:
-                    item.update({
+                    item |= {
                         'rhash': r['rhash'],
                         'invoice': r['invoice'],
-                    })
+                    }
                 d[key] = item
         self.data['seed_version'] = 29
 
@@ -722,8 +708,11 @@ class WalletDB(JsonDB):
             return
         PR_TYPE_ONCHAIN = 0
         invoices_old = self.data.get('invoices', {})
-        invoices_new = {k: item for k, item in invoices_old.items()
-                        if not (item['type'] == PR_TYPE_ONCHAIN and item['outputs'] is None)}
+        invoices_new = {
+            k: item
+            for k, item in invoices_old.items()
+            if item['type'] != PR_TYPE_ONCHAIN or item['outputs'] is not None
+        }
         self.data['invoices'] = invoices_new
         self.data['seed_version'] = 32
 
@@ -756,8 +745,11 @@ class WalletDB(JsonDB):
             return
         PR_TYPE_ONCHAIN = 0
         requests_old = self.data.get('payment_requests', {})
-        requests_new = {k: item for k, item in requests_old.items()
-                        if not (item['type'] == PR_TYPE_ONCHAIN and item['outputs'] is None)}
+        requests_new = {
+            k: item
+            for k, item in requests_old.items()
+            if item['type'] != PR_TYPE_ONCHAIN or item['outputs'] is not None
+        }
         self.data['payment_requests'] = requests_new
         self.data['seed_version'] = 35
 
@@ -816,18 +808,17 @@ class WalletDB(JsonDB):
         # put 'seed_type' into keystores
         if not self._is_upgrade_method_needed(39, 39):
             return
-        for ks_name in ('keystore', *['x{}/'.format(i) for i in range(1, 16)]):
+        for ks_name in ('keystore', *[f'x{i}/' for i in range(1, 16)]):
             ks = self.data.get(ks_name, None)
             if ks is None: continue
             seed = ks.get('seed')
             if not seed: continue
             seed_type = None
-            xpub = ks.get('xpub') or None
-            if xpub:
+            if xpub := ks.get('xpub') or None:
                 assert isinstance(xpub, str)
-                if xpub[0:4] in ('xpub', 'tpub'):
+                if xpub[:4] in ('xpub', 'tpub'):
                     seed_type = 'standard'
-                elif xpub[0:4] in ('zpub', 'Zpub', 'vpub', 'Vpub'):
+                elif xpub[:4] in ('zpub', 'Zpub', 'vpub', 'Vpub'):
                     seed_type = 'segwit'
             elif ks.get('type') == 'old':
                 seed_type = 'old'
@@ -932,7 +923,8 @@ class WalletDB(JsonDB):
         def get_id_from_onchain_outputs(raw_outputs, timestamp):
             outputs = [PartialTxOutput.from_legacy_tuple(*output) for output in raw_outputs]
             outputs_str = "\n".join(f"{txout.scriptpubkey.hex()}, {txout.value}" for txout in outputs)
-            return sha256d(outputs_str + "%d" % timestamp).hex()[0:10]
+            return sha256d(outputs_str + "%d" % timestamp).hex()[:10]
+
         for key, item in list(invoices.items()):
             is_lightning = item['lightning_invoice'] is not None
             if is_lightning:
@@ -959,8 +951,7 @@ class WalletDB(JsonDB):
         # recalc keys of requests
         requests = self.data.get('payment_requests', {})
         for key, item in list(requests.items()):
-            lnaddr = item.get('lightning_invoice')
-            if lnaddr:
+            if lnaddr := item.get('lightning_invoice'):
                 lnaddr = lndecode(lnaddr)
                 rhash = lnaddr.paymenthash.hex()
                 if key != rhash:
@@ -982,9 +973,11 @@ class WalletDB(JsonDB):
         if not self._is_upgrade_method_needed(48, 48):
             return
         channels = self.data.get('channels', {})
-        legacy_chans = [chan_dict for chan_dict in channels.values()
-                        if chan_dict['channel_type'] == ChannelType.OPTION_LEGACY_CHANNEL]
-        if legacy_chans:
+        if legacy_chans := [
+            chan_dict
+            for chan_dict in channels.values()
+            if chan_dict['channel_type'] == ChannelType.OPTION_LEGACY_CHANNEL
+        ]:
             raise WalletFileException(
                 f"This wallet contains {len(legacy_chans)} lightning channels of type 'LEGACY'. "
                 f"These channels were created using unreleased development versions of Electrum "
@@ -1057,8 +1050,8 @@ class WalletDB(JsonDB):
             return False
         elif cur_version < min_version:
             raise WalletFileException(
-                'storage upgrade: unexpected version {} (should be {}-{})'
-                .format(cur_version, min_version, max_version))
+                f'storage upgrade: unexpected version {cur_version} (should be {min_version}-{max_version})'
+            )
         else:
             return True
 
@@ -1068,9 +1061,9 @@ class WalletDB(JsonDB):
         if not seed_version:
             seed_version = OLD_SEED_VERSION if len(self.get('master_public_key','')) == 128 else NEW_SEED_VERSION
         if seed_version > FINAL_SEED_VERSION:
-            raise WalletFileException('This version of Electrum is too old to open this wallet.\n'
-                                      '(highest supported storage version: {}, version of this file: {})'
-                                      .format(FINAL_SEED_VERSION, seed_version))
+            raise WalletFileException(
+                f'This version of Electrum is too old to open this wallet.\n(highest supported storage version: {FINAL_SEED_VERSION}, version of this file: {seed_version})'
+            )
         if seed_version==14 and self.get('seed_type') == 'segwit':
             self._raise_unsupported_version(seed_version)
         if seed_version >=12:
@@ -1371,15 +1364,13 @@ class WalletDB(JsonDB):
     def get_num_all_inputs_of_tx(self, txid: str) -> Optional[int]:
         assert isinstance(txid, str)
         tx_fees_value = self.tx_fees.get(txid)
-        if tx_fees_value is None:
-            return None
-        return tx_fees_value.num_inputs
+        return None if tx_fees_value is None else tx_fees_value.num_inputs
 
     @locked
     def get_num_ismine_inputs_of_tx(self, txid: str) -> int:
         assert isinstance(txid, str)
         txins = self.txi.get(txid, {})
-        return sum([len(tupls) for addr, tupls in txins.items()])
+        return sum(len(tupls) for addr, tupls in txins.items())
 
     @modifier
     def remove_tx_fee(self, txid: str) -> None:
@@ -1456,9 +1447,9 @@ class WalletDB(JsonDB):
                     self.data['addresses'][name] = []
             self.change_addresses = self.data['addresses']['change']
             self.receiving_addresses = self.data['addresses']['receiving']
-            self._addr_to_addr_index = {}  # type: Dict[str, Sequence[int]]  # key: address, value: (is_change, index)
-            for i, addr in enumerate(self.receiving_addresses):
-                self._addr_to_addr_index[addr] = (0, i)
+            self._addr_to_addr_index = {
+                addr: (0, i) for i, addr in enumerate(self.receiving_addresses)
+            }
             for i, addr in enumerate(self.change_addresses):
                 self._addr_to_addr_index[addr] = (1, i)
 
@@ -1505,33 +1496,33 @@ class WalletDB(JsonDB):
     def _convert_dict(self, path, key, v):
         if key == 'transactions':
             # note: for performance, "deserialize=False" so that we will deserialize these on-demand
-            v = dict((k, tx_from_any(x, deserialize=False)) for k, x in v.items())
+            v = {k: tx_from_any(x, deserialize=False) for k, x in v.items()}
         if key == 'invoices':
-            v = dict((k, Invoice(**x)) for k, x in v.items())
+            v = {k: Invoice(**x) for k, x in v.items()}
         if key == 'payment_requests':
-            v = dict((k, Request(**x)) for k, x in v.items())
+            v = {k: Request(**x) for k, x in v.items()}
         elif key == 'adds':
-            v = dict((k, UpdateAddHtlc.from_tuple(*x)) for k, x in v.items())
+            v = {k: UpdateAddHtlc.from_tuple(*x) for k, x in v.items()}
         elif key == 'fee_updates':
-            v = dict((k, FeeUpdate(**x)) for k, x in v.items())
+            v = {k: FeeUpdate(**x) for k, x in v.items()}
         elif key == 'submarine_swaps':
-            v = dict((k, SwapData(**x)) for k, x in v.items())
+            v = {k: SwapData(**x) for k, x in v.items()}
         elif key == 'imported_channel_backups':
-            v = dict((k, ImportedChannelBackupStorage(**x)) for k, x in v.items())
+            v = {k: ImportedChannelBackupStorage(**x) for k, x in v.items()}
         elif key == 'onchain_channel_backups':
-            v = dict((k, OnchainChannelBackupStorage(**x)) for k, x in v.items())
+            v = {k: OnchainChannelBackupStorage(**x) for k, x in v.items()}
         elif key == 'tx_fees':
-            v = dict((k, TxFeesValue(*x)) for k, x in v.items())
+            v = {k: TxFeesValue(*x) for k, x in v.items()}
         elif key == 'prevouts_by_scripthash':
-            v = dict((k, {(prevout, value) for (prevout, value) in x}) for k, x in v.items())
+            v = {k: set(x) for k, x in v.items()}
         elif key == 'buckets':
-            v = dict((k, ShachainElement(bfh(x[0]), int(x[1]))) for k, x in v.items())
+            v = {k: ShachainElement(bfh(x[0]), int(x[1])) for k, x in v.items()}
         elif key == 'data_loss_protect_remote_pcp':
-            v = dict((k, bfh(x)) for k, x in v.items())
+            v = {k: bfh(x) for k, x in v.items()}
         # convert htlc_id keys to int
         if key in ['adds', 'locked_in', 'settles', 'fails', 'fee_updates', 'buckets',
                    'unacked_updates', 'unfulfilled_htlcs', 'fail_htlc_reasons', 'onion_keys']:
-            v = dict((int(k), x) for k, x in v.items())
+            v = {int(k): x for k, x in v.items()}
         # convert keys to HTLCOwner
         if key == 'log' or (path and path[-1] in ['locked_in', 'fails', 'settles']):
             if "1" in v:
@@ -1558,9 +1549,7 @@ class WalletDB(JsonDB):
         if key == 'keystore':
             return False
         multisig_keystore_names = [('x%d/' % i) for i in range(1, 16)]
-        if key in multisig_keystore_names:
-            return False
-        return True
+        return key not in multisig_keystore_names
 
     def write(self, storage: 'WalletStorage'):
         with self.lock:
@@ -1585,7 +1574,7 @@ class WalletDB(JsonDB):
         out = []
         result = self.get_split_accounts()
         for data in result:
-            path = root_path + '.' + data['suffix']
+            path = f'{root_path}.' + data['suffix']
             storage = WalletStorage(path)
             db = WalletDB(json.dumps(data), manual_upgrades=False)
             db._called_after_upgrade_tasks = False
@@ -1595,8 +1584,7 @@ class WalletDB(JsonDB):
         return out
 
     def get_action(self):
-        action = run_hook('get_action', self)
-        return action
+        return run_hook('get_action', self)
 
     def load_plugins(self):
         wallet_type = self.get('wallet_type')

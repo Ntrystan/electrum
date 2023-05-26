@@ -152,8 +152,9 @@ class SimpleConfig(Logger):
                 if new_key not in config:
                     config[new_key] = config[old_key]
                     if deprecation_warning:
-                        self.logger.warning('Note that the {} variable has been deprecated. '
-                                            'You should use {} instead.'.format(old_key, new_key))
+                        self.logger.warning(
+                            f'Note that the {old_key} variable has been deprecated. You should use {new_key} instead.'
+                        )
                 del config[old_key]
                 updated = True
         return updated
@@ -216,7 +217,7 @@ class SimpleConfig(Logger):
             host, port, protocol = str(server_str).rsplit(':', 2)
             assert protocol in ('s', 't')
             int(port)  # Throw if cannot be converted to int
-            server_str = '{}:{}:s'.format(host, port)
+            server_str = f'{host}:{port}:s'
             self._set_key_in_user_config('server', server_str)
         except BaseException:
             self._set_key_in_user_config('server', None)
@@ -250,8 +251,9 @@ class SimpleConfig(Logger):
     def get_config_version(self):
         config_version = self.get('config_version', 1)
         if config_version > FINAL_CONFIG_VERSION:
-            self.logger.warning('config version ({}) is higher than latest ({})'
-                                .format(config_version, FINAL_CONFIG_VERSION))
+            self.logger.warning(
+                f'config version ({config_version}) is higher than latest ({FINAL_CONFIG_VERSION})'
+            )
         return config_version
 
     def is_modifiable(self, key) -> bool:
@@ -280,10 +282,7 @@ class SimpleConfig(Logger):
     def get_backup_dir(self):
         # this is used to save wallet file backups (without active lightning channels)
         # on Android, the export backup button uses android_backup_dir()
-        if 'ANDROID_DATA' in os.environ:
-            return None
-        else:
-            return self.get('backup_dir')
+        return None if 'ANDROID_DATA' in os.environ else self.get('backup_dir')
 
     def get_wallet_path(self, *, use_gui_last_wallet=False):
         """Set the path of the wallet."""
@@ -345,12 +344,10 @@ class SimpleConfig(Logger):
         """Returns fee in sat/kbyte."""
         slider_pos = max(slider_pos, 0)
         slider_pos = min(slider_pos, len(FEE_ETA_TARGETS))
-        if slider_pos < len(FEE_ETA_TARGETS):
-            num_blocks = FEE_ETA_TARGETS[int(slider_pos)]
-            fee = self.eta_target_to_fee(num_blocks)
-        else:
-            fee = self.eta_target_to_fee(1)
-        return fee
+        if slider_pos >= len(FEE_ETA_TARGETS):
+            return self.eta_target_to_fee(1)
+        num_blocks = FEE_ETA_TARGETS[int(slider_pos)]
+        return self.eta_target_to_fee(num_blocks)
 
     @impose_hard_limits_on_fee
     def eta_target_to_fee(self, num_blocks: int) -> Optional[int]:
@@ -416,9 +413,7 @@ class SimpleConfig(Logger):
 
     def eta_target(self, slider_pos: int) -> int:
         """Returns 'num blocks' ETA target for a fee slider position."""
-        if slider_pos == len(FEE_ETA_TARGETS):
-            return 1
-        return FEE_ETA_TARGETS[slider_pos]
+        return 1 if slider_pos == len(FEE_ETA_TARGETS) else FEE_ETA_TARGETS[slider_pos]
 
     def fee_to_eta(self, fee_per_kb: Optional[int]) -> int:
         """Returns 'num blocks' ETA estimate for given fee rate,
@@ -467,7 +462,7 @@ class SimpleConfig(Logger):
 
     def get_fee_status(self):
         target, tooltip, dyn = self.get_fee_target()
-        return tooltip + '  [%s]'%target if dyn else target + '  [Static]'
+        return f'{tooltip}  [{target}]' if dyn else f'{target}  [Static]'
 
     def get_fee_text(
             self,
@@ -487,7 +482,7 @@ class SimpleConfig(Logger):
             fee_per_byte = None
         else:
             fee_per_byte = fee_per_kb/1000
-            rate_str = format_fee_satoshis(fee_per_byte) + ' sat/byte'
+            rate_str = f'{format_fee_satoshis(fee_per_byte)} sat/byte'
 
         if dyn:
             if mempool:
@@ -569,12 +564,15 @@ class SimpleConfig(Logger):
         if dyn:
             max_pos = (len(FEE_DEPTH_TARGETS) - 1) if mempool else len(FEE_ETA_TARGETS)
             slider_pos = round(fee_level * max_pos)
-            fee_rate = self.depth_to_fee(slider_pos) if mempool else self.eta_to_fee(slider_pos)
+            return (
+                self.depth_to_fee(slider_pos)
+                if mempool
+                else self.eta_to_fee(slider_pos)
+            )
         else:
             max_pos = len(FEERATE_STATIC_VALUES) - 1
             slider_pos = round(fee_level * max_pos)
-            fee_rate = FEERATE_STATIC_VALUES[slider_pos]
-        return fee_rate
+            return FEERATE_STATIC_VALUES[slider_pos]
 
     def fee_per_kb(self, dyn: bool=None, mempool: bool=None, fee_level: float=None) -> Optional[int]:
         """Returns sat/kvB fee to pay for a txn.
@@ -663,15 +661,14 @@ class SimpleConfig(Logger):
 
     def get_ssl_domain(self):
         from .paymentrequest import check_ssl_config
-        if self.get('ssl_keyfile') and self.get('ssl_certfile'):
-            SSL_identity = check_ssl_config(self)
-        else:
-            SSL_identity = None
-        return SSL_identity
+        return (
+            check_ssl_config(self)
+            if self.get('ssl_keyfile') and self.get('ssl_certfile')
+            else None
+        )
 
     def get_netaddress(self, key: str) -> Optional[NetAddress]:
-        text = self.get(key)
-        if text:
+        if text := self.get(key):
             try:
                 return NetAddress.from_string(text)
             except:
@@ -698,10 +695,10 @@ class SimpleConfig(Logger):
         )
 
     def format_amount_and_units(self, *args, **kwargs) -> str:
-        return self.format_amount(*args, **kwargs) + ' ' + self.get_base_unit()
+        return f'{self.format_amount(*args, **kwargs)} {self.get_base_unit()}'
 
     def format_fee_rate(self, fee_rate):
-        return format_fee_satoshis(fee_rate/1000, num_zeros=self.num_zeros) + ' sat/byte'
+        return f'{format_fee_satoshis(fee_rate / 1000, num_zeros=self.num_zeros)} sat/byte'
 
     def get_base_unit(self):
         return decimal_point_to_base_unit_name(self.decimal_point)
@@ -729,6 +726,4 @@ def read_user_config(path):
     except Exception as exc:
         _logger.warning(f"Cannot read config file at {config_path}: {exc}")
         return {}
-    if not type(result) is dict:
-        return {}
-    return result
+    return {} if type(result) is not dict else result

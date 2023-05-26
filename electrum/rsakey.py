@@ -95,11 +95,7 @@ def mpiToNumber(mpi): #mpi is an openssl-format bignum string
 
 def numberToMPI(n):
     b = numberToByteArray(n)
-    ext = 0
-    #If the high-order bit is going to be set,
-    #add an extra byte of zeros
-    if (numBits(n) & 0x7)==0:
-        ext = 1
+    ext = 1 if (numBits(n) & 0x7)==0 else 0
     length = numBytes(n) + ext
     b = bytearray(4+ext) + b
     b[0] = (length >> 24) & 0xFF
@@ -166,18 +162,15 @@ def invMod(a, b):
         q = d // c
         c, d = d-(q*c), c
         uc, ud = ud - (q * uc), uc
-    if d == 1:
-        return ud % b
-    return 0
+    return ud % b if d == 1 else 0
 
 
 def powMod(base, power, modulus):
-    if power < 0:
-        result = pow(base, power*-1, modulus)
-        result = invMod(result, modulus)
-        return result
-    else:
+    if power >= 0:
         return pow(base, power, modulus)
+    result = pow(base, power*-1, modulus)
+    result = invMod(result, modulus)
+    return result
 
 #Pre-calculate a sieve of the ~100 primes < 1000:
 def makeSieve(n):
@@ -208,7 +201,7 @@ def isPrime(n, iterations=5, display=False):
         s, t = s//2, t+1
     #Repeat Rabin-Miller x times
     a = 2 #Use 2 as a base for first iteration speedup, per HAC
-    for count in range(iterations):
+    for _ in range(iterations):
         v = powMod(a, s, n)
         if v==1:
             continue
@@ -310,8 +303,7 @@ class RSAKey(object):
         """
         hashBytes = SHA1(bytearray(bytes))
         prefixedHashBytes = self._addPKCS1SHA1Prefix(hashBytes)
-        sigBytes = self.sign(prefixedHashBytes)
-        return sigBytes
+        return self.sign(prefixedHashBytes)
 
     def hashAndVerify(self, sigBytes, bytes):
         """Hash and verify the passed-in bytes with the signature.
@@ -355,8 +347,7 @@ class RSAKey(object):
         if m >= self.n:
             raise ValueError()
         c = self._rawPrivateKeyOp(m)
-        sigBytes = numberToByteArray(c, numBytes(self.n))
-        return sigBytes
+        return numberToByteArray(c, numBytes(self.n))
 
     def verify(self, sigBytes, bytes):
         """Verify the passed-in bytes with the signature.
@@ -398,8 +389,7 @@ class RSAKey(object):
         if m >= self.n:
             raise ValueError()
         c = self._rawPublicKeyOp(m)
-        encBytes = numberToByteArray(c, numBytes(self.n))
-        return encBytes
+        return numberToByteArray(c, numBytes(self.n))
 
     def decrypt(self, encBytes):
         """Decrypt the passed-in bytes.
@@ -453,12 +443,11 @@ class RSAKey(object):
         # all fairly moot.
         if not withNULL:
             prefixBytes = bytearray(\
-            [0x30,0x1f,0x30,0x07,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x04,0x14])
+                [0x30,0x1f,0x30,0x07,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x04,0x14])
         else:
             prefixBytes = bytearray(\
-            [0x30,0x21,0x30,0x09,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x05,0x00,0x04,0x14])
-        prefixedBytes = prefixBytes + bytes
-        return prefixedBytes
+                [0x30,0x21,0x30,0x09,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x05,0x00,0x04,0x14])
+        return prefixBytes + bytes
 
     def _addPKCS1Padding(self, bytes, blockType):
         padLength = (numBytes(self.n) - (len(bytes)+3))
@@ -474,8 +463,7 @@ class RSAKey(object):
             raise AssertionError()
 
         padding = bytearray([0,blockType] + pad + [0])
-        paddedBytes = padding + bytes
-        return paddedBytes
+        return padding + bytes
 
 
 
@@ -512,20 +500,18 @@ class RSAKey(object):
         s1 = powMod(m, self.dP, self.p)
         s2 = powMod(m, self.dQ, self.q)
         h = ((s1 - s2) * self.qInv) % self.p
-        c = s2 + self.q * h
-        return c
+        return s2 + self.q * h
 
     def _rawPublicKeyOp(self, c):
-        m = powMod(c, self.e, self.n)
-        return m
+        return powMod(c, self.e, self.n)
 
     def acceptsPassword(self):
         return False
 
-    def generate(bits):
+    def generate(self):
         key = RSAKey()
-        p = getRandomPrime(bits//2, False)
-        q = getRandomPrime(bits//2, False)
+        p = getRandomPrime(self // 2, False)
+        q = getRandomPrime(self // 2, False)
         t = lcm(p-1, q-1)
         key.n = p * q
         key.e = 65537

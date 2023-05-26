@@ -124,18 +124,17 @@ def create_sweeptx_for_their_revoked_ctx(
     witness_script = make_commitment_output_to_local_witness_script(
         revocation_pubkey, to_self_delay, this_delayed_pubkey).hex()
     to_local_address = redeem_script_to_address('p2wsh', witness_script)
-    output_idxs = ctx.get_output_idxs_from_address(to_local_address)
-    if output_idxs:
+    if output_idxs := ctx.get_output_idxs_from_address(to_local_address):
         output_idx = output_idxs.pop()
-        sweep_tx = lambda: create_sweeptx_ctx_to_local(
+        return lambda: create_sweeptx_ctx_to_local(
             sweep_address=sweep_address,
             ctx=ctx,
             output_idx=output_idx,
             witness_script=bfh(witness_script),
             privkey=other_revocation_privkey,
             is_revocation=True,
-            config=chan.lnworker.config)
-        return sweep_tx
+            config=chan.lnworker.config,
+        )
     return None
 
 
@@ -249,11 +248,11 @@ def create_sweeptxs_for_our_ctx(
 
     # HTLCs
     def create_txns_for_htlc(
-            *, htlc: 'UpdateAddHtlc',
-            htlc_direction: Direction,
-            ctx_output_idx: int,
-            htlc_relative_idx: int,
-            preimage: Optional[bytes]):
+                *, htlc: 'UpdateAddHtlc',
+                htlc_direction: Direction,
+                ctx_output_idx: int,
+                htlc_relative_idx: int,
+                preimage: Optional[bytes]):
         htlctx_witness_script, htlc_tx = create_htlctx_that_spends_from_our_ctx(
             chan=chan,
             our_pcp=our_pcp,
@@ -278,11 +277,12 @@ def create_sweeptxs_for_our_ctx(
             csv_delay=0,
             cltv_expiry=htlc_tx.locktime,
             gen_tx=lambda: htlc_tx)
-        txs[htlc_tx.txid() + ':0'] = SweepInfo(
+        txs[f'{htlc_tx.txid()}:0'] = SweepInfo(
             name='second-stage-htlc',
             csv_delay=to_self_delay,
             cltv_expiry=0,
-            gen_tx=sweep_tx)
+            gen_tx=sweep_tx,
+        )
 
     # offered HTLCs, in our ctx --> "timeout"
     # received HTLCs, in our ctx --> "success"

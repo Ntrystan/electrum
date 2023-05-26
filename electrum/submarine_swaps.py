@@ -228,12 +228,9 @@ class SwapManager(Logger):
         return config.estimate_fee(136, allow_fallback_to_static_rates=True)
 
     def get_swap(self, payment_hash: bytes) -> Optional[SwapData]:
-        # for history
-        swap = self.swaps.get(payment_hash.hex())
-        if swap:
+        if swap := self.swaps.get(payment_hash.hex()):
             return swap
-        payment_hash = self.prepayments.get(payment_hash)
-        if payment_hash:
+        if payment_hash := self.prepayments.get(payment_hash):
             return self.swaps.get(payment_hash.hex())
 
     def add_lnwatcher_callback(self, swap: SwapData) -> None:
@@ -279,10 +276,8 @@ class SwapManager(Logger):
             "refundPublicKey": pubkey.hex()
         }
         response = await self.network.async_send_http_on_proxy(
-            'post',
-            self.api_url + '/createswap',
-            json=request_data,
-            timeout=30)
+            'post', f'{self.api_url}/createswap', json=request_data, timeout=30
+        )
         data = json.loads(response)
         response_id = data["id"]
         zeroconf = data["acceptZeroConf"]
@@ -292,7 +287,7 @@ class SwapManager(Logger):
         redeem_script = data["redeemScript"]
         # verify redeem_script is built with our pubkey and preimage
         redeem_script = bytes.fromhex(redeem_script)
-        parsed_script = [x for x in script_GetOp(redeem_script)]
+        parsed_script = list(script_GetOp(redeem_script))
         if not match_script_against_template(redeem_script, WITNESS_TEMPLATE_SWAP):
             raise Exception("fswap check failed: scriptcode does not match template")
         if script_to_p2wsh(redeem_script.hex()) != lockup_address:
@@ -377,10 +372,8 @@ class SwapManager(Logger):
             "claimPublicKey": pubkey.hex()
         }
         response = await self.network.async_send_http_on_proxy(
-            'post',
-            self.api_url + '/createswap',
-            json=request_data,
-            timeout=30)
+            'post', f'{self.api_url}/createswap', json=request_data, timeout=30
+        )
         data = json.loads(response)
         invoice = data['invoice']
         fee_invoice = data.get('minerFeeInvoice')
@@ -391,7 +384,7 @@ class SwapManager(Logger):
         response_id = data['id']
         # verify redeem_script is built with our pubkey and preimage
         redeem_script = bytes.fromhex(redeem_script)
-        parsed_script = [x for x in script_GetOp(redeem_script)]
+        parsed_script = list(script_GetOp(redeem_script))
         if not match_script_against_template(redeem_script, WITNESS_TEMPLATE_REVERSE_SWAP):
             raise Exception("rswap check failed: scriptcode does not match template")
         if script_to_p2wsh(redeem_script.hex()) != lockup_address:
@@ -452,6 +445,7 @@ class SwapManager(Logger):
         async def wait_for_funding(swap):
             while swap.spending_txid is None:
                 await asyncio.sleep(1)
+
         # initiate main payment
         tasks = [asyncio.create_task(self.lnworker.pay_invoice(invoice, attempts=10, channels=channels)), asyncio.create_task(wait_for_funding(swap))]
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -470,9 +464,8 @@ class SwapManager(Logger):
         from .network import Network
         try:
             response = await Network.async_send_http_on_proxy(
-                'get',
-                self.api_url + '/getpairs',
-                timeout=30)
+                'get', f'{self.api_url}/getpairs', timeout=30
+            )
         except aiohttp.ClientError as e:
             self.logger.error(f"Swap server errored: {e!r}")
             raise SwapServerError() from e
@@ -659,11 +652,7 @@ class SwapManager(Logger):
         amount_sat = txin.value_sats() - cls._get_claim_fee(config=config)
         if amount_sat < dust_threshold():
             raise BelowDustLimit()
-        if swap.is_reverse:  # successful reverse swap
-            locktime = 0
-            # preimage will be set in sign_tx
-        else:  # timing out forward swap
-            locktime = swap.locktime
+        locktime = 0 if swap.is_reverse else swap.locktime
         tx = create_claim_tx(
             txin=txin,
             witness_script=swap.redeem_script,

@@ -147,7 +147,7 @@ class Policy(NamedTuple):
 
     @property
     def short_channel_id(self) -> ShortChannelID:
-        return ShortChannelID.normalize(self.key[0:8])
+        return ShortChannelID.normalize(self.key[:8])
 
     @property
     def start_node(self) -> bytes:
@@ -191,8 +191,9 @@ class NodeInfo(NamedTuple):
         buf = addresses_field
         def read(n):
             nonlocal buf
-            data, buf = buf[0:n], buf[n:]
+            data, buf = buf[:n], buf[n:]
             return data
+
         addresses = []
         while buf:
             atype = ord(read(1))
@@ -377,9 +378,10 @@ class ChannelDB(SqlDB):
         if not self.data_loaded.is_set():
             raise Exception("channelDB data not loaded yet!")
         with self.lock:
-            ret = [self.get_last_good_address(node_id)
-                   for node_id in self._recent_peers]
-            return ret
+            return [
+                self.get_last_good_address(node_id)
+                for node_id in self._recent_peers
+            ]
 
     # note: currently channel announcements are trusted by default (trusted=True);
     #       they are not SPV-verified. Verifying them would make the gossip sync
@@ -396,7 +398,9 @@ class ChannelDB(SqlDB):
             if short_channel_id in self._channels:
                 continue
             if constants.net.rev_genesis_bytes() != msg['chain_hash']:
-                self.logger.info("ChanAnn has unexpected chain_hash {}".format(msg['chain_hash'].hex()))
+                self.logger.info(
+                    f"ChanAnn has unexpected chain_hash {msg['chain_hash'].hex()}"
+                )
                 continue
             try:
                 channel_info = ChannelInfo.from_msg(msg)
@@ -641,11 +645,10 @@ class ChannelDB(SqlDB):
         with self.lock:
             _policies = self._policies.copy()
         now = int(time.time())
-        return list(k for k, v in _policies.items() if v.timestamp <= now - delta)
+        return [k for k, v in _policies.items() if v.timestamp <= now - delta]
 
     def prune_old_policies(self, delta):
-        old_policies = self.get_old_policies(delta)
-        if old_policies:
+        if old_policies := self.get_old_policies(delta):
             for key in old_policies:
                 node_id, scid = key
                 with self.lock:
@@ -682,8 +685,7 @@ class ChannelDB(SqlDB):
     def remove_channel(self, short_channel_id: ShortChannelID):
         # FIXME what about rm-ing policies?
         with self.lock:
-            channel_info = self._channels.pop(short_channel_id, None)
-            if channel_info:
+            if channel_info := self._channels.pop(short_channel_id, None):
                 self._channels_for_node[channel_info.node1_id].remove(channel_info.short_channel_id)
                 self._channels_for_node[channel_info.node2_id].remove(channel_info.short_channel_id)
         self._update_num_policies_for_chan(short_channel_id)
@@ -692,11 +694,11 @@ class ChannelDB(SqlDB):
 
     def get_node_addresses(self, node_id: bytes) -> Sequence[Tuple[str, int, int]]:
         """Returns list of (host, port, timestamp)."""
-        addr_to_ts = self._addresses.get(node_id)
-        if not addr_to_ts:
+        if addr_to_ts := self._addresses.get(node_id):
+            return [(str(net_addr.host), net_addr.port, ts)
+                    for net_addr, ts in addr_to_ts.items()]
+        else:
             return []
-        return [(str(net_addr.host), net_addr.port, ts)
-                for net_addr, ts in addr_to_ts.items()]
 
     @sql
     @profiler
@@ -795,22 +797,21 @@ class ChannelDB(SqlDB):
             private_route_edges: Dict[ShortChannelID, 'RouteEdge'] = None,
     ) -> Optional['Policy']:
         channel_info = self.get_channel_info(short_channel_id)
-        if channel_info is not None:  # publicly announced channel
-            policy = self._policies.get((node_id, short_channel_id))
-            if policy:
-                return policy
-        else:  # private channel
-            chan_upd_dict = self._channel_updates_for_private_channels.get((node_id, short_channel_id))
-            if chan_upd_dict:
+        if channel_info is None:  # private channel
+            if chan_upd_dict := self._channel_updates_for_private_channels.get(
+                (node_id, short_channel_id)
+            ):
                 return Policy.from_msg(chan_upd_dict)
+        elif policy := self._policies.get((node_id, short_channel_id)):
+            return policy
         # check if it's one of our own channels
         if my_channels:
-            policy = get_mychannel_policy(short_channel_id, node_id, my_channels)
-            if policy:
+            if policy := get_mychannel_policy(
+                short_channel_id, node_id, my_channels
+            ):
                 return policy
         if private_route_edges:
-            route_edge = private_route_edges.get(short_channel_id, None)
-            if route_edge:
+            if route_edge := private_route_edges.get(short_channel_id, None):
                 return Policy.from_route_edge(route_edge)
 
     def get_channel_info(
@@ -820,17 +821,14 @@ class ChannelDB(SqlDB):
             my_channels: Dict[ShortChannelID, 'Channel'] = None,
             private_route_edges: Dict[ShortChannelID, 'RouteEdge'] = None,
     ) -> Optional[ChannelInfo]:
-        ret = self._channels.get(short_channel_id)
-        if ret:
+        if ret := self._channels.get(short_channel_id):
             return ret
         # check if it's one of our own channels
         if my_channels:
-            channel_info = get_mychannel_info(short_channel_id, my_channels)
-            if channel_info:
+            if channel_info := get_mychannel_info(short_channel_id, my_channels):
                 return channel_info
         if private_route_edges:
-            route_edge = private_route_edges.get(short_channel_id)
-            if route_edge:
+            if route_edge := private_route_edges.get(short_channel_id):
                 return ChannelInfo.from_route_edge(route_edge)
 
     def get_channels_for_node(
@@ -865,10 +863,10 @@ class ChannelDB(SqlDB):
         # check if it's one of our own channels
         if not my_channels:
             return
-        chan = my_channels.get(short_channel_id)  # type: Optional[Channel]
-        if not chan:
+        if chan := my_channels.get(short_channel_id):
+            return chan.get_local_pubkey(), chan.node_id
+        else:
             return
-        return chan.get_local_pubkey(), chan.node_id
 
     def get_node_info_for_node_id(self, node_id: bytes) -> Optional['NodeInfo']:
         return self._nodes.get(node_id)
@@ -920,6 +918,4 @@ class ChannelDB(SqlDB):
                 graph['channels'][-1]['policy1'] = policy1._asdict() if policy1 else None
                 graph['channels'][-1]['policy2'] = policy2._asdict() if policy2 else None
 
-        # need to use json_normalize otherwise json encoding in rpc server fails
-        graph = json_normalize(graph)
-        return graph
+        return json_normalize(graph)

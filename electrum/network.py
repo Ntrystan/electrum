@@ -138,8 +138,7 @@ def filter_protocol(hostmap, *, allowed_protocols: Iterable[str] = None) -> Sequ
     eligible = []
     for host, portmap in hostmap.items():
         for protocol in allowed_protocols:
-            port = portmap.get(protocol)
-            if port:
+            if port := portmap.get(protocol):
                 eligible.append(ServerAddr(host, port, protocol=protocol))
     return eligible
 
@@ -210,25 +209,17 @@ class TxBroadcastError(NetworkException):
 
 class TxBroadcastHashMismatch(TxBroadcastError):
     def get_message_for_gui(self):
-        return "{}\n{}\n\n{}" \
-            .format(_("The server returned an unexpected transaction ID when broadcasting the transaction."),
-                    _("Consider trying to connect to a different server, or updating Electrum."),
-                    str(self))
+        return f'{_("The server returned an unexpected transaction ID when broadcasting the transaction.")}\n{_("Consider trying to connect to a different server, or updating Electrum.")}\n\n{str(self)}'
 
 
 class TxBroadcastServerReturnedError(TxBroadcastError):
     def get_message_for_gui(self):
-        return "{}\n{}\n\n{}" \
-            .format(_("The server returned an error when broadcasting the transaction."),
-                    _("Consider trying to connect to a different server, or updating Electrum."),
-                    str(self))
+        return f'{_("The server returned an error when broadcasting the transaction.")}\n{_("Consider trying to connect to a different server, or updating Electrum.")}\n\n{str(self)}'
 
 
 class TxBroadcastUnknownError(TxBroadcastError):
     def get_message_for_gui(self):
-        return "{}\n{}" \
-            .format(_("Unknown error when broadcasting the transaction."),
-                    _("Consider trying to connect to a different server, or updating Electrum."))
+        return f'{_("Unknown error when broadcasting the transaction.")}\n{_("Consider trying to connect to a different server, or updating Electrum.")}'
 
 
 class UntrustedServerReturnedError(NetworkException):
@@ -511,19 +502,16 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
     def get_fee_estimates(self):
         from statistics import median
         from .simple_config import FEE_ETA_TARGETS
-        if self.auto_connect:
-            with self.interfaces_lock:
-                out = {}
-                for n in FEE_ETA_TARGETS:
-                    try:
-                        out[n] = int(median(filter(None, [i.fee_estimates_eta.get(n) for i in self.interfaces.values()])))
-                    except:
-                        continue
-                return out
-        else:
-            if not self.interface:
-                return {}
-            return self.interface.fee_estimates_eta
+        if not self.auto_connect:
+            return {} if not self.interface else self.interface.fee_estimates_eta
+        with self.interfaces_lock:
+            out = {}
+            for n in FEE_ETA_TARGETS:
+                try:
+                    out[n] = int(median(filter(None, [i.fee_estimates_eta.get(n) for i in self.interfaces.values()])))
+                except:
+                    continue
+            return out
 
     def update_fee_estimates(self, *, fee_est: Dict[int, int] = None):
         if fee_est is None:
@@ -540,11 +528,9 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         # note: order of sources when adding servers here is crucial!
         # don't let "server_peers" overwrite anything,
         # otherwise main server can eclipse the client
-        out = dict()
-        # add servers received from main interface
-        server_peers = self.server_peers
-        if server_peers:
-            out.update(filter_version(server_peers.copy()))
+        out = {}
+        if server_peers := self.server_peers:
+            out |= filter_version(server_peers.copy())
         # hardcoded servers
         out.update(constants.net.DEFAULT_SERVERS)
         # add recent servers
@@ -590,10 +576,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         return None
 
     def _set_default_server(self) -> None:
-        # Server for addresses and transactions
-        server = self.config.get('server', None)
-        # Sanitize default server
-        if server:
+        if server := self.config.get('server', None):
             try:
                 self.default_server = ServerAddr.from_str(server)
             except:
@@ -613,7 +596,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             # test for Tor
             self.tor_proxy = util.is_tor_socks_port(proxy['host'], int(proxy['port']))
             if self.tor_proxy:
-                self.logger.info(f'Proxy is TOR')
+                self.logger.info('Proxy is TOR')
 
         util.trigger_callback('proxy_set', self.proxy, self.tor_proxy)
 
@@ -676,8 +659,9 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             # switch to one that has the correct header (not height)
             best_header = self.blockchain().header_at_tip()
             with self.interfaces_lock: interfaces = list(self.interfaces.values())
-            filtered = list(filter(lambda iface: iface.tip_header == best_header, interfaces))
-            if filtered:
+            if filtered := list(
+                filter(lambda iface: iface.tip_header == best_header, interfaces)
+            ):
                 chosen_iface = random.choice(filtered)
                 await self.switch_to_interface(chosen_iface.server)
 
@@ -698,10 +682,9 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             # check if main interface is already on this fork
             if self.interface.blockchain == chain:
                 return
-            # switch to another random interface that is on this fork, if any
-            filtered = [iface for iface in interfaces
-                        if iface.blockchain == chain]
-            if filtered:
+            if filtered := [
+                iface for iface in interfaces if iface.blockchain == chain
+            ]:
                 self.logger.info(f"switching to (more) preferred fork (rank {rank})")
                 chosen_iface = random.choice(filtered)
                 await self.switch_to_interface(chosen_iface.server)
@@ -793,9 +776,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             return int(self.config.get('network_timeout'))
         if self.oneserver and not self.auto_connect:
             return request_type.MOST_RELAXED
-        if self.proxy:
-            return request_type.RELAXED
-        return request_type.NORMAL
+        return request_type.RELAXED if self.proxy else request_type.NORMAL
 
     @ignore_exceptions  # do not kill outer taskgroup
     @log_exceptions
@@ -1041,9 +1022,8 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             r"mandatory-script-verify-flag-failed": None,
             r"Transaction check failed": None,
         }
-        for substring in validation_error_messages:
+        for substring, msg in validation_error_messages.items():
             if substring in server_msg:
-                msg = validation_error_messages[substring]
                 return msg if msg else substring
         # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/rpc/rawtransaction.cpp
         # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/util/error.cpp
@@ -1170,8 +1150,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         with blockchain.blockchains_lock: blockchain_items = list(blockchain.blockchains.items())
         with self.interfaces_lock: interfaces_values = list(self.interfaces.values())
         for chain_id, bc in blockchain_items:
-            r = list(filter(lambda i: i.blockchain==bc, interfaces_values))
-            if r:
+            if r := list(filter(lambda i: i.blockchain == bc, interfaces_values)):
                 out[chain_id] = r
         return out
 
@@ -1191,12 +1170,12 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
     async def follow_chain_given_id(self, chain_id: str) -> None:
         bc = blockchain.blockchains.get(chain_id)
         if not bc:
-            raise Exception('blockchain {} not found'.format(chain_id))
+            raise Exception(f'blockchain {chain_id} not found')
         self._set_preferred_chain(bc)
         # select server on this chain
         with self.interfaces_lock: interfaces = list(self.interfaces.values())
         interfaces_on_selected_chain = list(filter(lambda iface: iface.blockchain == bc, interfaces))
-        if len(interfaces_on_selected_chain) == 0: return
+        if not interfaces_on_selected_chain: return
         chosen_iface = random.choice(interfaces_on_selected_chain)  # type: Interface
         # switch to server (and save to config)
         net_params = self.get_parameters()
@@ -1367,8 +1346,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
 
     @classmethod
     def send_http_on_proxy(cls, method, url, **kwargs):
-        network = cls.get_instance()
-        if network:
+        if network := cls.get_instance():
             assert util.get_running_loop() != network.asyncio_loop
             loop = network.asyncio_loop
         else:
@@ -1394,7 +1372,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
     ):
         if timeout is None:
             timeout = self.get_network_timeout_seconds(NetworkTimeout.Urgent)
-        responses = dict()
+        responses = {}
         async def get_response(server: ServerAddr):
             interface = Interface(network=self, server=server, proxy=self.proxy)
             try:
@@ -1407,6 +1385,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             except Exception as e:
                 res = e
             responses[interface.server] = res
+
         async with OldTaskGroup() as group:
             for server in servers:
                 await group.spawn(get_response(server))
@@ -1417,6 +1396,4 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         timeout = self.get_network_timeout_seconds(NetworkTimeout.Generic)
         replies = await self.send_multiple_requests(peers, 'blockchain.headers.subscribe', [], timeout=timeout)
         servers_replied = {serveraddr.host for serveraddr in replies.keys()}
-        servers_dict = {k: v for k, v in hostmap.items()
-                        if k in servers_replied}
-        return servers_dict
+        return {k: v for k, v in hostmap.items() if k in servers_replied}

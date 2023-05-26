@@ -117,7 +117,7 @@ class Command:
         for varname in ('wallet_path', 'wallet'):
             if varname in varnames:
                 assert varname in self.options
-        assert not ('wallet_path' in varnames and 'wallet' in varnames)
+        assert 'wallet_path' not in varnames or 'wallet' not in varnames
         if self.requires_wallet:
             assert 'wallet' in varnames
 
@@ -204,7 +204,7 @@ class Commands:
     async def getinfo(self):
         """ network info """
         net_params = self.network.get_parameters()
-        response = {
+        return {
             'network': constants.net.NET_NAME,
             'path': self.network.config.path,
             'server': net_params.server.host,
@@ -217,7 +217,6 @@ class Commands:
             'default_wallet': self.config.get_wallet_path(),
             'fee_per_kb': self.config.fee_per_kb(),
         }
-        return response
 
     @command('n')
     async def stop(self):
@@ -237,8 +236,7 @@ class Commands:
         wallet = self.daemon.load_wallet(wallet_path, password, manual_upgrades=False)
         if wallet is not None:
             run_hook('load_wallet', wallet, None)
-        response = wallet is not None
-        return response
+        return wallet is not None
 
     @command('n')
     async def close_wallet(self, wallet_path=None):
@@ -338,8 +336,7 @@ class Commands:
     async def make_seed(self, nbits=None, language=None, seed_type=None):
         """Create a seed"""
         from .mnemonic import Mnemonic
-        s = Mnemonic(language).make_seed(seed_type=seed_type, num_bits=nbits)
-        return s
+        return Mnemonic(language).make_seed(seed_type=seed_type, num_bits=nbits)
 
     @command('n')
     async def getaddresshistory(self, address):
@@ -401,8 +398,7 @@ class Commands:
             nsequence = txin_dict.get('nsequence', None)
             if nsequence is not None:
                 txin.nsequence = nsequence
-            sec = txin_dict.get('privkey')
-            if sec:
+            if sec := txin_dict.get('privkey'):
                 txin_type, privkey, compressed = bitcoin.deserialize_privkey(sec)
                 pubkey = ecc.ECPrivkey(privkey).get_public_key_hex(compressed=compressed)
                 keypairs[pubkey] = privkey, compressed
@@ -444,7 +440,7 @@ class Commands:
             pubkey = ecc.ECPrivkey(priv2).get_public_key_bytes(compressed=compressed)
             desc = descriptor.get_singlesig_descriptor_from_legacy_leaf(pubkey=pubkey.hex(), script_type=txin_type)
             address = desc.expand().address()
-            if address in txins_dict.keys():
+            if address in txins_dict:
                 for txin in txins_dict[address]:
                     txin.script_descriptor = desc
                 tx.sign({pubkey.hex(): (priv2, compressed)})
@@ -509,7 +505,7 @@ class Commands:
         if is_address(address):
             return wallet.export_private_key(address, password)
         domain = address
-        return [wallet.export_private_key(address, password) for address in domain]
+        return [wallet.export_private_key(domain, password) for domain in domain]
 
     @command('wp')
     async def getprivatekeyforpath(self, path, password=None, wallet: Abstract_Wallet = None):
@@ -588,7 +584,7 @@ class Commands:
         }
         # add currently running GUI
         if self.daemon and self.daemon.gui_object:
-            ret.update(self.daemon.gui_object.version_info())
+            ret |= self.daemon.gui_object.version_info()
         # always add Qt GUI, so we get info even when running this from CLI
         try:
             from .gui.qt import ElectrumGui as QtElectrumGui
@@ -638,8 +634,7 @@ class Commands:
     @command('wp')
     async def getseed(self, password=None, wallet: Abstract_Wallet = None):
         """Get seed phrase. Print the generation seed of your wallet."""
-        s = wallet.get_seed(password)
-        return s
+        return wallet.get_seed(password)
 
     @command('wp')
     async def importprivkey(self, privkey, password=None, wallet: Abstract_Wallet = None):
@@ -648,9 +643,9 @@ class Commands:
             return "Error: This type of wallet cannot import private keys. Try to create a new wallet with that key."
         try:
             addr = wallet.import_private_key(privkey, password)
-            out = "Keypair imported: " + addr
+            out = f"Keypair imported: {addr}"
         except Exception as e:
-            out = "Error: " + repr(e)
+            out = f"Error: {repr(e)}"
         return out
 
     def _resolver(self, x, wallet):
@@ -821,11 +816,11 @@ class Commands:
     @command('w')
     async def searchcontacts(self, query, wallet: Abstract_Wallet = None):
         """Search through contacts, return matching entries. """
-        results = {}
-        for key, value in wallet.contacts.items():
-            if query.lower() in key.lower():
-                results[key] = value
-        return results
+        return {
+            key: value
+            for key, value in wallet.contacts.items()
+            if query.lower() in key.lower()
+        }
 
     @command('w')
     async def listaddresses(self, receiving=False, change=False, labels=False, frozen=False, unused=False, funded=False, balance=False, wallet: Abstract_Wallet = None):
@@ -855,9 +850,7 @@ class Commands:
     @command('n')
     async def gettransaction(self, txid, wallet: Abstract_Wallet = None):
         """Retrieve a transaction. """
-        tx = None
-        if wallet:
-            tx = wallet.db.get_transaction(txid)
+        tx = wallet.db.get_transaction(txid) if wallet else None
         if tx is None:
             raw = await self.network.get_transaction(txid)
             if raw:
@@ -894,18 +887,18 @@ class Commands:
     @command('w')
     async def get_request(self, request_id, wallet: Abstract_Wallet = None):
         """Returns a payment request"""
-        r = wallet.get_request(request_id)
-        if not r:
+        if r := wallet.get_request(request_id):
+            return wallet.export_request(r)
+        else:
             raise Exception("Request not found")
-        return wallet.export_request(r)
 
     @command('w')
     async def get_invoice(self, invoice_id, wallet: Abstract_Wallet = None):
         """Returns an invoice (request for outgoing payment)"""
-        r = wallet.get_invoice(invoice_id)
-        if not r:
+        if r := wallet.get_invoice(invoice_id):
+            return wallet.export_invoice(r)
+        else:
             raise Exception("Request not found")
-        return wallet.export_invoice(r)
 
     #@command('w')
     #async def ackrequest(self, serialized):
@@ -1054,7 +1047,7 @@ class Commands:
         elif fee_method.lower() == 'mempool':
             dyn, mempool = True, True
         else:
-            raise Exception('Invalid fee estimation method: {}'.format(fee_method))
+            raise Exception(f'Invalid fee estimation method: {fee_method}')
         if fee_level is not None:
             fee_level = to_decimal(fee_level)
         return self.config.fee_per_kb(dyn=dyn, mempool=mempool, fee_level=fee_level)
@@ -1150,7 +1143,9 @@ class Commands:
     @command('wl')
     async def nodeid(self, wallet: Abstract_Wallet = None):
         listen_addr = self.config.get('lightning_listen')
-        return wallet.lnworker.node_keypair.pubkey.hex() + (('@' + listen_addr) if listen_addr else '')
+        return wallet.lnworker.node_keypair.pubkey.hex() + (
+            f'@{listen_addr}' if listen_addr else ''
+        )
 
     @command('wl')
     async def list_channels(self, wallet: Abstract_Wallet = None):
@@ -1610,7 +1605,7 @@ def get_parser():
                 add_wallet_option(p)
                 continue
             a, help = command_options[optname]
-            b = '--' + optname
+            b = f'--{optname}'
             action = "store_true" if default is False else 'store'
             args = (a, b) if a else (b,)
             if action == 'store':
@@ -1627,8 +1622,7 @@ def get_parser():
             _type = arg_types.get(param, str)
             p.add_argument(param, help=h, type=_type)
 
-        cvh = config_variables.get(cmdname)
-        if cvh:
+        if cvh := config_variables.get(cmdname):
             group = p.add_argument_group('configuration variables', '(set with setconfig/getconfig)')
             for k, v in cvh.items():
                 group.add_argument(k, nargs='?', help=v)

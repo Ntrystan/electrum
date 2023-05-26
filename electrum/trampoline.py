@@ -104,23 +104,18 @@ def is_legacy_relay(invoice_features, r_tags) -> Tuple[bool, List[bytes]]:
     # trampoline-supporting wallets:
     if invoice_features.supports(LnFeatures.OPTION_TRAMPOLINE_ROUTING_OPT_ECLAIR)\
        or invoice_features.supports(LnFeatures.OPTION_TRAMPOLINE_ROUTING_OPT_ELECTRUM):
-        # If there are no r_tags (routing hints) included, the wallet doesn't have
-        # private channels and is probably directly connected to a trampoline node.
-        # Any trampoline node should be able to figure out a path to the receiver and
-        # we can use an e2e payment.
         if not r_tags:
             return False, []
-        else:
-            # - We choose one routing hint at random, and
-            #   use end-to-end trampoline if that node is a trampoline-forwarder (TF).
-            # - In case of e2e, the route will have either one or two TFs (one neighbour of sender,
-            #   and one neighbour of recipient; and these might coincide). Note that there are some
-            #   channel layouts where two TFs are needed for a payment to succeed, e.g. both
-            #   endpoints connected to T1 and T2, and sender only has send-capacity with T1, while
-            #   recipient only has recv-capacity with T2.
-            singlehop_r_tags = [x for x in r_tags if len(x) == 1]
-            invoice_trampolines = [x[0][0] for x in singlehop_r_tags if is_hardcoded_trampoline(x[0][0])]
-            return False, invoice_trampolines
+        # - We choose one routing hint at random, and
+        #   use end-to-end trampoline if that node is a trampoline-forwarder (TF).
+        # - In case of e2e, the route will have either one or two TFs (one neighbour of sender,
+        #   and one neighbour of recipient; and these might coincide). Note that there are some
+        #   channel layouts where two TFs are needed for a payment to succeed, e.g. both
+        #   endpoints connected to T1 and T2, and sender only has send-capacity with T1, while
+        #   recipient only has recv-capacity with T2.
+        singlehop_r_tags = [x for x in r_tags if len(x) == 1]
+        invoice_trampolines = [x[0][0] for x in singlehop_r_tags if is_hardcoded_trampoline(x[0][0])]
+        return False, invoice_trampolines
     # if trampoline receiving is not supported or the forwarder is not known as a trampoline,
     # we send a legacy payment
     return True, []
@@ -208,19 +203,15 @@ def create_trampoline_route(
         route[-1].invoice_routing_info = invoice_routing_info
         route[-1].invoice_features = invoice_features
         route[-1].outgoing_node_id = invoice_pubkey
-    else:
-        if invoice_trampolines:
-            if my_trampoline in invoice_trampolines:
-                short_route = [my_trampoline.hex(), invoice_pubkey.hex()]
-                if short_route in failed_routes:
-                    add_trampoline = True
-                else:
-                    add_trampoline = False
-            else:
-                add_trampoline = True
-            if add_trampoline:
-                second_trampoline = choose_second_trampoline(my_trampoline, invoice_trampolines, failed_routes)
-                extend_trampoline_route(route, my_trampoline, second_trampoline, trampoline_fee_level)
+    elif invoice_trampolines:
+        if my_trampoline in invoice_trampolines:
+            short_route = [my_trampoline.hex(), invoice_pubkey.hex()]
+            add_trampoline = short_route in failed_routes
+        else:
+            add_trampoline = True
+        if add_trampoline:
+            second_trampoline = choose_second_trampoline(my_trampoline, invoice_trampolines, failed_routes)
+            extend_trampoline_route(route, my_trampoline, second_trampoline, trampoline_fee_level)
 
     # final edge (not part of the route if payment is legacy, but eclair requires an encrypted blob)
     extend_trampoline_route(route, route[-1].end_node, invoice_pubkey, trampoline_fee_level, pay_fees=False)

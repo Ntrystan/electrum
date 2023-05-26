@@ -110,8 +110,9 @@ class SPV(NetworkJobOnDefaultServer):
         # Verify the hash of the server-provided merkle branch to a
         # transaction matches the merkle root of its block
         if tx_height != merkle.get('block_height'):
-            self.logger.info('requested tx_height {} differs from received tx_height {} for txid {}'
-                             .format(tx_height, merkle.get('block_height'), tx_hash))
+            self.logger.info(
+                f"requested tx_height {tx_height} differs from received tx_height {merkle.get('block_height')} for txid {tx_hash}"
+            )
         tx_height = merkle.get('block_height')
         pos = merkle.get('pos')
         merkle_branch = merkle.get('merkle')
@@ -143,7 +144,7 @@ class SPV(NetworkJobOnDefaultServer):
         try:
             h = hash_decode(tx_hash)
             merkle_branch_bytes = [hash_decode(item) for item in merkle_branch]
-            leaf_pos_in_tree = int(leaf_pos_in_tree)  # raise if invalid
+            leaf_pos_in_tree = leaf_pos_in_tree
         except Exception as e:
             raise MerkleVerificationFailure(e)
         if leaf_pos_in_tree < 0:
@@ -157,7 +158,7 @@ class SPV(NetworkJobOnDefaultServer):
             h = sha256d(inner_node)
             index >>= 1
         if index != 0:
-            raise MerkleVerificationFailure(f'leaf_pos_in_tree too large for branch')
+            raise MerkleVerificationFailure('leaf_pos_in_tree too large for branch')
         return hash_encode(h)
 
     @classmethod
@@ -200,11 +201,13 @@ def verify_tx_is_in_block(tx_hash: str, merkle_branch: Sequence[str],
                           block_height: int) -> None:
     """Raise MerkleVerificationFailure if verification fails."""
     if not block_header:
-        raise MissingBlockHeader("merkle verification failed for {} (missing header {})"
-                                 .format(tx_hash, block_height))
+        raise MissingBlockHeader(
+            f"merkle verification failed for {tx_hash} (missing header {block_height})"
+        )
     if len(merkle_branch) > 30:
         raise MerkleVerificationFailure(f"merkle branch too long: {len(merkle_branch)}")
     calc_merkle_root = SPV.hash_merkle_root(merkle_branch, tx_hash, leaf_pos_in_tree)
     if block_header.get('merkle_root') != calc_merkle_root:
-        raise MerkleRootMismatch("merkle verification failed for {} ({} != {})".format(
-            tx_hash, block_header.get('merkle_root'), calc_merkle_root))
+        raise MerkleRootMismatch(
+            f"merkle verification failed for {tx_hash} ({block_header.get('merkle_root')} != {calc_merkle_root})"
+        )

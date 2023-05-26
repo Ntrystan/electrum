@@ -61,7 +61,7 @@ def _prepare_windows_dns_hack():
 
 
 def _is_force_system_dns_for_host(host: str) -> bool:
-    return str(host) in ('localhost', 'localhost.',)
+    return host in {'localhost', 'localhost.'}
 
 
 def _fast_getaddrinfo(host, *args, **kwargs):
@@ -71,9 +71,7 @@ def _fast_getaddrinfo(host, *args, **kwargs):
             return False  # already valid IP
         except ValueError:
             pass  # not an IP
-        if _is_force_system_dns_for_host(host):
-            return False
-        return True
+        return not _is_force_system_dns_for_host(host)
 
     def resolve_with_dnspython(host):
         addrs = []
@@ -101,10 +99,7 @@ def _fast_getaddrinfo(host, *args, **kwargs):
         except BaseException as e:
             # Possibly internal error in dnspython :( see #4483 and #5638
             _logger.info(f'dnspython failed to resolve dns (A) for {repr(host)} with error: {repr(e)}')
-        if addrs:
-            return addrs
-        # Fall back to original socket.getaddrinfo to resolve dns.
-        return [host]
+        return addrs if addrs else [host]
 
     addrs = [host]
     if needs_dns_resolving(host):

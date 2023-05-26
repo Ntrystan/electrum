@@ -78,7 +78,9 @@ class BaseCrashReporter(Logger):
         report = self.get_traceback_info()
         report.update(self.get_additional_info())
         report = json.dumps(report)
-        coro = self.do_post(proxy, BaseCrashReporter.report_server + "/crash.json", data=report)
+        coro = self.do_post(
+            proxy, f"{BaseCrashReporter.report_server}/crash.json", data=report
+        )
         response = asyncio.run_coroutine_threadsafe(coro, asyncio_loop).result(timeout)
         self.logger.info(
             f"Crash report sent. Got response [DO NOT TRUST THIS MESSAGE]: {error_text_str_to_safe_str(response)}")
@@ -89,15 +91,14 @@ class BaseCrashReporter(Logger):
             assert isinstance(location, str)
             base_issues_url = constants.GIT_REPO_ISSUES_URL
             if not base_issues_url.endswith("/"):
-                base_issues_url = base_issues_url + "/"
+                base_issues_url = f"{base_issues_url}/"
             if not location.startswith(base_issues_url):
                 location = None
-        ret = CrashReportResponse(
+        return CrashReportResponse(
             status=response.get("status"),
             url=location,
             text=_("Thanks for reporting this issue!"),
         )
-        return ret
 
     async def do_post(self, proxy, url, data) -> str:
         async with make_aiohttp_session(proxy) as session:

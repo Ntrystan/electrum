@@ -82,15 +82,17 @@ else:
 
 
 if not (HAS_CRYPTODOME or HAS_CRYPTOGRAPHY):
-    sys.exit(f"Error: at least one of ('pycryptodomex', 'cryptography') needs to be installed.")
+    sys.exit(
+        "Error: at least one of ('pycryptodomex', 'cryptography') needs to be installed."
+    )
 
 
 def version_info() -> Mapping[str, Optional[str]]:
-    ret = {}
-    if HAS_PYAES:
-        ret["pyaes.version"] = ".".join(map(str, pyaes.VERSION[:3]))
-    else:
-        ret["pyaes.version"] = None
+    ret = {
+        "pyaes.version": ".".join(map(str, pyaes.VERSION[:3]))
+        if HAS_PYAES
+        else None
+    }
     if HAS_CRYPTODOME:
         ret["cryptodome.version"] = Cryptodome.__version__
         if hasattr(Cryptodome, "__path__"):
@@ -122,7 +124,7 @@ def append_PKCS7_padding(data: bytes) -> bytes:
 
 def strip_PKCS7_padding(data: bytes) -> bytes:
     assert_bytes(data)
-    if len(data) % 16 != 0 or len(data) == 0:
+    if len(data) % 16 != 0 or not data:
         raise InvalidPadding("invalid length")
     padlen = data[-1]
     if not (0 < padlen <= 16):
@@ -130,7 +132,7 @@ def strip_PKCS7_padding(data: bytes) -> bytes:
     for i in data[-padlen:]:
         if i != padlen:
             raise InvalidPadding("invalid padding byte (inconsistent)")
-    return data[0:-padlen]
+    return data[:-padlen]
 
 
 def aes_encrypt_with_iv(key: bytes, iv: bytes, data: bytes) -> bytes:
@@ -182,8 +184,7 @@ def EncodeAES_bytes(secret: bytes, msg: bytes) -> bytes:
 def DecodeAES_bytes(secret: bytes, ciphertext: bytes) -> bytes:
     assert_bytes(ciphertext)
     iv, e = ciphertext[:16], ciphertext[16:]
-    s = aes_decrypt_with_iv(secret, iv, e)
-    return s
+    return aes_decrypt_with_iv(secret, iv, e)
 
 
 PW_HASH_VERSION_LATEST = 1
@@ -222,9 +223,8 @@ def _hash_password(password: Union[bytes, str], *, version: int) -> bytes:
         raise UnsupportedPasswordHashVersion(version)
     if version == 1:
         return sha256d(pw)
-    else:
-        assert version not in KNOWN_PW_HASH_VERSIONS
-        raise UnexpectedPasswordHashVersion(version)
+    assert version not in KNOWN_PW_HASH_VERSIONS
+    raise UnexpectedPasswordHashVersion(version)
 
 
 def _pw_encode_raw(data: bytes, password: Union[bytes, str], *, version: int) -> bytes:
@@ -232,9 +232,7 @@ def _pw_encode_raw(data: bytes, password: Union[bytes, str], *, version: int) ->
         raise UnexpectedPasswordHashVersion(version)
     # derive key from password
     secret = _hash_password(password, version=version)
-    # encrypt given data
-    ciphertext = EncodeAES_bytes(secret, data)
-    return ciphertext
+    return EncodeAES_bytes(secret, data)
 
 
 def _pw_decode_raw(data_bytes: bytes, password: Union[bytes, str], *, version: int) -> bytes:
@@ -273,7 +271,7 @@ def pw_encode_with_version_and_mac(data: bytes, password: Union[bytes, str]) -> 
     # https://crypto.stackexchange.com/questions/202/should-we-mac-then-encrypt-or-encrypt-then-mac
     # Encrypt-and-MAC. The MAC will be used to detect invalid passwords
     version = PW_HASH_VERSION_LATEST
-    mac = sha256(data)[0:4]
+    mac = sha256(data)[:4]
     ciphertext = _pw_encode_raw(data, password, version=version)
     ciphertext_b64 = base64.b64encode(bytes([version]) + ciphertext + mac)
     return ciphertext_b64.decode('utf8')
@@ -291,7 +289,7 @@ def pw_decode_with_version_and_mac(data: str, password: Union[bytes, str]) -> by
     if version not in KNOWN_PW_HASH_VERSIONS:
         raise UnexpectedPasswordHashVersion(version)
     decrypted = _pw_decode_raw(encrypted, password, version=version)
-    if sha256(decrypted)[0:4] != mac:
+    if sha256(decrypted)[:4] != mac:
         raise InvalidPassword()
     return decrypted
 
@@ -323,8 +321,7 @@ def sha256(x: Union[bytes, str]) -> bytes:
 
 def sha256d(x: Union[bytes, str]) -> bytes:
     x = to_bytes(x, 'utf8')
-    out = bytes(sha256(sha256(x)))
-    return out
+    return bytes(sha256(sha256(x)))
 
 
 def hash_160(x: bytes) -> bytes:
@@ -410,7 +407,10 @@ def chacha20_encrypt(*, key: bytes, nonce: bytes, data: bytes) -> bytes:
     assert isinstance(nonce, (bytes, bytearray))
     assert isinstance(data, (bytes, bytearray))
     assert len(key) == 32, f"unexpected key size: {len(key)} (expected: 32)"
-    assert len(nonce) in (8, 12), f"unexpected nonce size: {len(nonce)} (expected: 8 or 12)"
+    assert len(nonce) in {
+        8,
+        12,
+    }, f"unexpected nonce size: {len(nonce)} (expected: 8 or 12)"
     if HAS_CRYPTODOME:
         cipher = CD_ChaCha20.new(key=key, nonce=nonce)
         return cipher.encrypt(data)
@@ -428,7 +428,10 @@ def chacha20_decrypt(*, key: bytes, nonce: bytes, data: bytes) -> bytes:
     assert isinstance(nonce, (bytes, bytearray))
     assert isinstance(data, (bytes, bytearray))
     assert len(key) == 32, f"unexpected key size: {len(key)} (expected: 32)"
-    assert len(nonce) in (8, 12), f"unexpected nonce size: {len(nonce)} (expected: 8 or 12)"
+    assert len(nonce) in {
+        8,
+        12,
+    }, f"unexpected nonce size: {len(nonce)} (expected: 8 or 12)"
     if HAS_CRYPTODOME:
         cipher = CD_ChaCha20.new(key=key, nonce=nonce)
         return cipher.decrypt(data)

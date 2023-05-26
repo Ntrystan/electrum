@@ -71,9 +71,7 @@ CJK_INTERVALS = [
 
 def is_CJK(c):
     n = ord(c)
-    for imin,imax,name in CJK_INTERVALS:
-        if n>=imin and n<=imax: return True
-    return False
+    return any(n>=imin and n<=imax for imin, imax, name in CJK_INTERVALS)
 
 
 def normalize_text(seed: str) -> str:
@@ -85,9 +83,17 @@ def normalize_text(seed: str) -> str:
     seed = u''.join([c for c in seed if not unicodedata.combining(c)])
     # normalize whitespaces
     seed = u' '.join(seed.split())
-    # remove whitespaces between CJK
-    seed = u''.join([seed[i] for i in range(len(seed)) if not (seed[i] in string.whitespace and is_CJK(seed[i-1]) and is_CJK(seed[i+1]))])
-    return seed
+    return u''.join(
+        [
+            seed[i]
+            for i in range(len(seed))
+            if not (
+                seed[i] in string.whitespace
+                and is_CJK(seed[i - 1])
+                and is_CJK(seed[i + 1])
+            )
+        ]
+    )
 
 
 _WORDLIST_CACHE = {}  # type: Dict[str, Wordlist]
@@ -151,12 +157,12 @@ class Mnemonic(Logger):
         Logger.__init__(self)
         lang = lang or 'en'
         self.logger.info(f'language {lang}')
-        filename = filenames.get(lang[0:2], 'english.txt')
+        filename = filenames.get(lang[:2], 'english.txt')
         self.wordlist = Wordlist.from_file(filename)
         self.logger.info(f"wordlist has {len(self.wordlist)} words")
 
     @classmethod
-    def mnemonic_to_seed(self, mnemonic, passphrase) -> bytes:
+    def mnemonic_to_seed(cls, mnemonic, passphrase) -> bytes:
         PBKDF2_ROUNDS = 2048
         mnemonic = normalize_text(mnemonic)
         passphrase = passphrase or ''
@@ -240,10 +246,10 @@ def is_old_seed(seed: str) -> bool:
         uses_electrum_words = False
     try:
         seed = bfh(seed)
-        is_hex = (len(seed) == 16 or len(seed) == 32)
+        is_hex = len(seed) in {16, 32}
     except Exception:
         is_hex = False
-    return is_hex or (uses_electrum_words and (len(words) == 12 or len(words) == 24))
+    return is_hex or uses_electrum_words and len(words) in {12, 24}
 
 
 def seed_type(x: str) -> str:
@@ -269,4 +275,4 @@ def is_seed(x: str) -> bool:
 
 
 def is_any_2fa_seed_type(seed_type: str) -> bool:
-    return seed_type in ['2fa', '2fa_segwit']
+    return seed_type in {'2fa', '2fa_segwit'}

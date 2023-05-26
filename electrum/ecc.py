@@ -70,11 +70,12 @@ def der_sig_from_r_and_s(r: int, s: int) -> bytes:
     ret = _libsecp256k1.secp256k1_ecdsa_signature_normalize(_libsecp256k1.ctx, sig, sig)
     der_sig = create_string_buffer(80)  # this much space should be enough
     der_sig_size = c_size_t(len(der_sig))
-    ret = _libsecp256k1.secp256k1_ecdsa_signature_serialize_der(_libsecp256k1.ctx, der_sig, byref(der_sig_size), sig)
-    if not ret:
+    if ret := _libsecp256k1.secp256k1_ecdsa_signature_serialize_der(
+        _libsecp256k1.ctx, der_sig, byref(der_sig_size), sig
+    ):
+        return bytes(der_sig)[:der_sig_size.value]
+    else:
         raise Exception("failed to serialize DER sig")
-    der_sig_size = der_sig_size.value
-    return bytes(der_sig)[:der_sig_size]
 
 
 def get_r_and_s_from_der_sig(der_sig: bytes) -> Tuple[int, int]:
@@ -160,17 +161,19 @@ class ECPubkey(object):
         if len(sig_string) != 64:
             raise Exception(f'wrong encoding used for signature? len={len(sig_string)} (should be 64)')
         if not (0 <= recid <= 3):
-            raise ValueError('recid is {}, but should be 0 <= recid <= 3'.format(recid))
+            raise ValueError(f'recid is {recid}, but should be 0 <= recid <= 3')
         sig65 = create_string_buffer(65)
         ret = _libsecp256k1.secp256k1_ecdsa_recoverable_signature_parse_compact(
             _libsecp256k1.ctx, sig65, sig_string, recid)
         if not ret:
             raise Exception('failed to parse signature')
         pubkey = create_string_buffer(64)
-        ret = _libsecp256k1.secp256k1_ecdsa_recover(_libsecp256k1.ctx, pubkey, sig65, msg_hash)
-        if not ret:
+        if ret := _libsecp256k1.secp256k1_ecdsa_recover(
+            _libsecp256k1.ctx, pubkey, sig65, msg_hash
+        ):
+            return ECPubkey._from_libsecp256k1_pubkey_ptr(pubkey)
+        else:
             raise InvalidECPointException('failed to recover public key')
-        return ECPubkey._from_libsecp256k1_pubkey_ptr(pubkey)
 
     @classmethod
     def from_signature65(cls, sig: bytes, msg_hash: bytes) -> Tuple['ECPubkey', bool, Optional[str]]:
@@ -213,12 +216,10 @@ class ECPubkey(object):
         if self.is_at_infinity(): raise Exception('point is at infinity')
         x = int.to_bytes(self.x(), length=32, byteorder='big', signed=False)
         y = int.to_bytes(self.y(), length=32, byteorder='big', signed=False)
-        if compressed:
-            header = b'\x03' if self.y() & 1 else b'\x02'
-            return header + x
-        else:
-            header = b'\x04'
-            return header + x + y
+        if not compressed:
+            return b'\x04' + x + y
+        header = b'\x03' if self.y() & 1 else b'\x02'
+        return header + x
 
     def get_public_key_hex(self, compressed=True) -> str:
         return self.get_public_key_bytes(compressed).hex()
@@ -238,11 +239,12 @@ class ECPubkey(object):
     def _to_libsecp256k1_pubkey_ptr(self):
         pubkey = create_string_buffer(64)
         public_pair_bytes = self.get_public_key_bytes(compressed=False)
-        ret = _libsecp256k1.secp256k1_ec_pubkey_parse(
-            _libsecp256k1.ctx, pubkey, public_pair_bytes, len(public_pair_bytes))
-        if not ret:
+        if ret := _libsecp256k1.secp256k1_ec_pubkey_parse(
+            _libsecp256k1.ctx, pubkey, public_pair_bytes, len(public_pair_bytes)
+        ):
+            return pubkey
+        else:
             raise Exception('public key could not be parsed or is invalid')
-        return pubkey
 
     @classmethod
     def _from_libsecp256k1_pubkey_ptr(cls, pubkey) -> 'ECPubkey':
@@ -254,29 +256,31 @@ class ECPubkey(object):
 
     def __repr__(self):
         if self.is_at_infinity():
-            return f"<ECPubkey infinity>"
+            return "<ECPubkey infinity>"
         return f"<ECPubkey {self.get_public_key_hex()}>"
 
     def __mul__(self, other: int):
         if not isinstance(other, int):
-            raise TypeError('multiplication not defined for ECPubkey and {}'.format(type(other)))
+            raise TypeError(f'multiplication not defined for ECPubkey and {type(other)}')
 
         other %= CURVE_ORDER
         if self.is_at_infinity() or other == 0:
             return POINT_AT_INFINITY
         pubkey = self._to_libsecp256k1_pubkey_ptr()
 
-        ret = _libsecp256k1.secp256k1_ec_pubkey_tweak_mul(_libsecp256k1.ctx, pubkey, other.to_bytes(32, byteorder="big"))
-        if not ret:
+        if ret := _libsecp256k1.secp256k1_ec_pubkey_tweak_mul(
+            _libsecp256k1.ctx, pubkey, other.to_bytes(32, byteorder="big")
+        ):
+            return ECPubkey._from_libsecp256k1_pubkey_ptr(pubkey)
+        else:
             return POINT_AT_INFINITY
-        return ECPubkey._from_libsecp256k1_pubkey_ptr(pubkey)
 
     def __rmul__(self, other: int):
         return self * other
 
     def __add__(self, other):
         if not isinstance(other, ECPubkey):
-            raise TypeError('addition not defined for ECPubkey and {}'.format(type(other)))
+            raise TypeError(f'addition not defined for ECPubkey and {type(other)}')
         if self.is_at_infinity(): return other
         if other.is_at_infinity(): return self
 
@@ -287,15 +291,15 @@ class ECPubkey(object):
         pubkey1 = cast(pubkey1, c_char_p)
         pubkey2 = cast(pubkey2, c_char_p)
         array_of_pubkey_ptrs = (c_char_p * 2)(pubkey1, pubkey2)
-        ret = _libsecp256k1.secp256k1_ec_pubkey_combine(_libsecp256k1.ctx, pubkey_sum, array_of_pubkey_ptrs, 2)
-        if not ret:
+        if ret := _libsecp256k1.secp256k1_ec_pubkey_combine(
+            _libsecp256k1.ctx, pubkey_sum, array_of_pubkey_ptrs, 2
+        ):
+            return ECPubkey._from_libsecp256k1_pubkey_ptr(pubkey_sum)
+        else:
             return POINT_AT_INFINITY
-        return ECPubkey._from_libsecp256k1_pubkey_ptr(pubkey_sum)
 
     def __eq__(self, other) -> bool:
-        if not isinstance(other, ECPubkey):
-            return False
-        return self.point() == other.point()
+        return self.point() == other.point() if isinstance(other, ECPubkey) else False
 
     def __ne__(self, other):
         return not (self == other)
@@ -305,7 +309,7 @@ class ECPubkey(object):
 
     def __lt__(self, other):
         if not isinstance(other, ECPubkey):
-            raise TypeError('comparison not defined for ECPubkey and {}'.format(type(other)))
+            raise TypeError(f'comparison not defined for ECPubkey and {type(other)}')
         p1 = ((self.x() or 0), (self.y() or 0))
         p2 = ((other.x() or 0), (other.y() or 0))
         return p1 < p2
@@ -318,16 +322,13 @@ class ECPubkey(object):
         except Exception:
             return False
         # check public key
-        if public_key != self:
-            return False
-        # check message
-        return self.verify_message_hash(sig65[1:], h)
+        return False if public_key != self else self.verify_message_hash(sig65[1:], h)
 
     def verify_message_hash(self, sig_string: bytes, msg_hash: bytes) -> bool:
         assert_bytes(sig_string)
         if len(sig_string) != 64:
             return False
-        if not (isinstance(msg_hash, bytes) and len(msg_hash) == 32):
+        if not isinstance(msg_hash, bytes) or len(msg_hash) != 32:
             return False
 
         sig = create_string_buffer(64)
@@ -337,9 +338,12 @@ class ECPubkey(object):
         ret = _libsecp256k1.secp256k1_ecdsa_signature_normalize(_libsecp256k1.ctx, sig, sig)
 
         pubkey = self._to_libsecp256k1_pubkey_ptr()
-        if 1 != _libsecp256k1.secp256k1_ecdsa_verify(_libsecp256k1.ctx, sig, msg_hash, pubkey):
-            return False
-        return True
+        return (
+            _libsecp256k1.secp256k1_ecdsa_verify(
+                _libsecp256k1.ctx, sig, msg_hash, pubkey
+            )
+            == 1
+        )
 
     def encrypt_message(self, message: bytes, magic: bytes = b'BIE1') -> bytes:
         """
@@ -350,7 +354,7 @@ class ECPubkey(object):
         ephemeral = ECPrivkey.generate_random_key()
         ecdh_key = (self * ephemeral.secret_scalar).get_public_key_bytes(compressed=True)
         key = hashlib.sha512(ecdh_key).digest()
-        iv, key_e, key_m = key[0:16], key[16:32], key[32:]
+        iv, key_e, key_m = key[:16], key[16:32], key[32:]
         ciphertext = aes_encrypt_with_iv(key_e, iv, message)
         ephemeral_pubkey = ephemeral.get_public_key_bytes(compressed=True)
         encrypted = magic + ephemeral_pubkey + ciphertext
@@ -423,7 +427,9 @@ class ECPrivkey(ECPubkey):
     def __init__(self, privkey_bytes: bytes):
         assert_bytes(privkey_bytes)
         if len(privkey_bytes) != 32:
-            raise Exception('unexpected size for secret. should be 32 bytes, not {}'.format(len(privkey_bytes)))
+            raise Exception(
+                f'unexpected size for secret. should be 32 bytes, not {len(privkey_bytes)}'
+            )
         secret = string_to_number(privkey_bytes)
         if not is_secret_within_curve_range(secret):
             raise InvalidECPointException('Invalid secret scalar (not within curve order)')
@@ -450,8 +456,7 @@ class ECPrivkey(ECPubkey):
         scalar = string_to_number(privkey_bytes) % CURVE_ORDER
         if scalar == 0:
             raise Exception('invalid EC private key scalar: zero')
-        privkey_32bytes = int.to_bytes(scalar, length=32, byteorder='big', signed=False)
-        return privkey_32bytes
+        return int.to_bytes(scalar, length=32, byteorder='big', signed=False)
 
     def __repr__(self):
         return f"<ECPrivkey {self.get_public_key_hex()}>"
@@ -541,7 +546,7 @@ class ECPrivkey(ECPubkey):
             raise Exception('invalid ciphertext: invalid ephemeral pubkey') from e
         ecdh_key = (ephemeral_pubkey * self.secret_scalar).get_public_key_bytes(compressed=True)
         key = hashlib.sha512(ecdh_key).digest()
-        iv, key_e, key_m = key[0:16], key[16:32], key[32:]
+        iv, key_e, key_m = key[:16], key[16:32], key[32:]
         if mac != hmac_oneshot(key_m, encrypted[:-32], hashlib.sha256):
             raise InvalidPassword()
         return aes_decrypt_with_iv(key_e, iv, ciphertext)

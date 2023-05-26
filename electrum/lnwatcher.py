@@ -75,7 +75,7 @@ class SweepStore(SqlDB):
     def list_sweep_tx(self):
         c = self.conn.cursor()
         c.execute("SELECT funding_outpoint FROM sweep_txs")
-        return set([r[0] for r in c.fetchall()])
+        return {r[0] for r in c.fetchall()}
 
     @sql
     def add_sweep_tx(self, funding_outpoint, ctn, prevout, raw_tx):
@@ -220,8 +220,7 @@ class LNWatcher(Logger, EventListener):
         closing_txid = spenders.get(funding_outpoint)
         closing_height = self.adb.get_tx_height(closing_txid)
         if closing_txid:
-            closing_tx = self.adb.get_transaction(closing_txid)
-            if closing_tx:
+            if closing_tx := self.adb.get_transaction(closing_txid):
                 keep_watching = await self.do_breach_remedy(funding_outpoint, closing_tx, spenders)
             else:
                 self.logger.info(f"channel {funding_outpoint} closed by {closing_txid}. still waiting for tx itself...")
@@ -282,10 +281,9 @@ class LNWatcher(Logger, EventListener):
             if match_script_against_template(redeem_script, WITNESS_TEMPLATE_OFFERED_HTLC):
                 #self.logger.info(f"input script matches offered htlc {redeem_script.hex()}")
                 pass
-            elif match_script_against_template(redeem_script, WITNESS_TEMPLATE_RECEIVED_HTLC):
-                #self.logger.info(f"input script matches received htlc {redeem_script.hex()}")
-                pass
-            else:
+            elif not match_script_against_template(
+                redeem_script, WITNESS_TEMPLATE_RECEIVED_HTLC
+            ):
                 return result
         for i, o in enumerate(spender_tx.outputs()):
             if o.address is None:
@@ -294,7 +292,7 @@ class LNWatcher(Logger, EventListener):
                 self.adb.add_address(o.address)
             elif n < 2:
                 r = self.inspect_tx_candidate(spender_txid+':%d'%i, n+1)
-                result.update(r)
+                result |= r
         return result
 
     def get_tx_mined_depth(self, txid: str):
@@ -444,19 +442,18 @@ class LNWalletWatcher(LNWatcher):
         keep_watching = False if sweep_info_dict else not self.is_deeply_mined(closing_tx.txid())
         # create and broadcast transaction
         for prevout, sweep_info in sweep_info_dict.items():
-            name = sweep_info.name + ' ' + chan.get_id_for_log()
+            name = f'{sweep_info.name} {chan.get_id_for_log()}'
             spender_txid = spenders.get(prevout)
             spender_tx = self.adb.get_transaction(spender_txid) if spender_txid else None
             if spender_tx:
-                # the spender might be the remote, revoked or not
-                e_htlc_tx = chan.maybe_sweep_revoked_htlc(closing_tx, spender_tx)
-                if e_htlc_tx:
-                    spender2 = spenders.get(spender_txid+':0')
-                    if spender2:
+                if e_htlc_tx := chan.maybe_sweep_revoked_htlc(
+                    closing_tx, spender_tx
+                ):
+                    if spender2 := spenders.get(f'{spender_txid}:0'):
                         keep_watching |= not self.is_deeply_mined(spender2)
                     else:
                         keep_watching = True
-                    await self.maybe_redeem(spenders, spender_txid+':0', e_htlc_tx, name)
+                    await self.maybe_redeem(spenders, f'{spender_txid}:0', e_htlc_tx, name)
                 else:
                     keep_watching |= not self.is_deeply_mined(spender_tx.txid())
                     txin_idx = spender_tx.get_input_idx_that_spent_prevout(TxOutpoint.from_str(prevout))

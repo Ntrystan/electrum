@@ -50,6 +50,10 @@ def shorten_amount(amount):
 def unshorten_amount(amount) -> Decimal:
     """ Given a shortened amount, convert it into a decimal
     """
+    unit = str(amount)[-1]
+    if not re.fullmatch("\\d+[pnum]?", str(amount)):
+        raise LnDecodeException(f"Invalid amount '{amount}'")
+
     # BOLT #11:
     # The following `multiplier` letters are defined:
     #
@@ -63,17 +67,7 @@ def unshorten_amount(amount) -> Decimal:
         'u': 10**6,
         'm': 10**3,
     }
-    unit = str(amount)[-1]
-    # BOLT #11:
-    # A reader SHOULD fail if `amount` contains a non-digit, or is followed by
-    # anything except a `multiplier` in the table above.
-    if not re.fullmatch("\\d+[pnum]?", str(amount)):
-        raise LnDecodeException("Invalid amount '{}'".format(amount))
-
-    if unit in units.keys():
-        return Decimal(amount[:-1]) / units[unit]
-    else:
-        return Decimal(amount)
+    return Decimal(amount[:-1]) / units[unit] if unit in units else Decimal(amount)
 
 _INT_TO_BINSTR = {a: '0' * (5-len(bin(a)[2:])) + bin(a)[2:] for a in range(32)}
 
@@ -110,7 +104,7 @@ def encode_fallback(fallback: str, net: Type[AbstractNet]):
 
 
 def parse_fallback(fallback, net: Type[AbstractNet]):
-    wver = fallback[0:5].uint
+    wver = fallback[:5].uint
     if wver == 17:
         addr = hash160_to_b58_address(fallback[5:].tobytes(), net.ADDRTYPE_P2PKH)
     elif wver == 18:
@@ -160,9 +154,7 @@ def trim_to_min_length(bits):
 def trim_to_bytes(barr):
     # Adds a byte if necessary.
     b = barr.tobytes()
-    if barr.len % 8 != 0:
-        return b[:-1]
-    return b
+    return b[:-1] if barr.len % 8 != 0 else b
 
 # Try to pull out tagged data: returns tag, tagged data and remainder.
 def pull_tagged(stream):
@@ -176,17 +168,14 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
     else:
         amount = addr.net.BOLT11_HRP if addr.net else ''
 
-    hrp = 'ln' + amount
+    hrp = f'ln{amount}'
 
     # Start with the timestamp
     data = bitstring.pack('uint:35', addr.date)
 
-    tags_set = set()
-
     # Payment hash
     data += tagged_bytes('p', addr.paymenthash)
-    tags_set.add('p')
-
+    tags_set = {'p'}
     if addr.payment_secret is not None:
         data += tagged_bytes('s', addr.payment_secret)
         tags_set.add('s')
@@ -198,7 +187,7 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
         # A writer MUST NOT include more than one `d`, `h`, `n` or `x` fields,
         if k in ('d', 'h', 'n', 'x', 'p', 's'):
             if k in tags_set:
-                raise LnEncodeException("Duplicate '{}' tag".format(k))
+                raise LnEncodeException(f"Duplicate '{k}' tag")
 
         if k == 'r':
             route = bitstring.BitArray()
@@ -215,7 +204,7 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
                 data += encode_fallback(v, addr.net)
         elif k == 'd':
             # truncate to max length: 1024*5 bits = 639 bytes
-            data += tagged_bytes('d', v.encode()[0:639])
+            data += tagged_bytes('d', v.encode()[:639])
         elif k == 'x':
             expirybits = bitstring.pack('intbe:64', v)
             expirybits = trim_to_min_length(expirybits)
@@ -236,7 +225,7 @@ def lnencode(addr: 'LnAddr', privkey) -> str:
             data += tagged('9', feature_bits)
         else:
             # FIXME: Support unknown tags?
-            raise LnEncodeException("Unknown tag {}".format(k))
+            raise LnEncodeException(f"Unknown tag {k}")
 
         tags_set.add(k)
 
@@ -295,9 +284,7 @@ class LnAddr(object):
 
     def get_amount_sat(self) -> Optional[Decimal]:
         # note that this has msat resolution potentially
-        if self.amount is None:
-            return None
-        return self.amount * COIN
+        return None if self.amount is None else self.amount * COIN
 
     def get_routing_info(self, tag):
         # note: tag will be 't' for trampoline
@@ -310,29 +297,20 @@ class LnAddr(object):
         return r_tags
 
     def get_amount_msat(self) -> Optional[int]:
-        if self.amount is None:
-            return None
-        return int(self.amount * COIN * 1000)
+        return None if self.amount is None else int(self.amount * COIN * 1000)
 
     def get_features(self) -> 'LnFeatures':
         from .lnutil import LnFeatures
         return LnFeatures(self.get_tag('9') or 0)
 
     def __str__(self):
-        return "LnAddr[{}, amount={}{} tags=[{}]]".format(
-            hexlify(self.pubkey.serialize()).decode('utf-8') if self.pubkey else None,
-            self.amount, self.net.BOLT11_HRP,
-            ", ".join([k + '=' + str(v) for k, v in self.tags])
-        )
+        return f"""LnAddr[{hexlify(self.pubkey.serialize()).decode('utf-8') if self.pubkey else None}, amount={self.amount}{self.net.BOLT11_HRP} tags=[{", ".join([f'{k}={str(v)}' for k, v in self.tags])}]]"""
 
     def get_min_final_cltv_expiry(self) -> int:
         return self._min_final_cltv_expiry
 
     def get_tag(self, tag):
-        for k, v in self.tags:
-            if k == tag:
-                return v
-        return None
+        return next((v for k, v in self.tags if k == tag), None)
 
     def get_description(self) -> str:
         return self.get_tag('d') or ''
@@ -390,9 +368,8 @@ def lndecode(invoice: str, *, verbose=False, net=None) -> LnAddr:
     addr = LnAddr()
     addr.pubkey = None
 
-    m = re.search("[^\\d]+", hrp[2:])
-    if m:
-        addr.net = BOLT11_HRP_INV_DICT[m.group(0)]
+    if m := re.search("[^\\d]+", hrp[2:]):
+        addr.net = BOLT11_HRP_INV_DICT[m[0]]
         amountstr = hrp[2+m.end():]
         # BOLT #11:
         #
@@ -442,8 +419,7 @@ def lndecode(invoice: str, *, verbose=False, net=None) -> LnAddr:
                  s.read(16).uintbe)
             addr.tags.append(('t', e))
         elif tag == 'f':
-            fallback = parse_fallback(tagdata, addr.net)
-            if fallback:
+            if fallback := parse_fallback(tagdata, addr.net):
                 addr.tags.append(('f', fallback))
             else:
                 # Incorrect version.
@@ -494,12 +470,16 @@ def lndecode(invoice: str, *, verbose=False, net=None) -> LnAddr:
             addr.unknown_tags.append((tag, tagdata))
 
     if verbose:
-        print('hex of signature data (32 byte r, 32 byte s): {}'
-              .format(hexlify(sigdecoded[0:64])))
-        print('recovery flag: {}'.format(sigdecoded[64]))
-        print('hex of data for signing: {}'
-              .format(hexlify(hrp.encode("ascii") + data.tobytes())))
-        print('SHA256 of above: {}'.format(sha256(hrp.encode("ascii") + data.tobytes()).hexdigest()))
+        print(
+            f'hex of signature data (32 byte r, 32 byte s): {hexlify(sigdecoded[:64])}'
+        )
+        print(f'recovery flag: {sigdecoded[64]}')
+        print(
+            f'hex of data for signing: {hexlify(hrp.encode("ascii") + data.tobytes())}'
+        )
+        print(
+            f'SHA256 of above: {sha256(hrp.encode("ascii") + data.tobytes()).hexdigest()}'
+        )
 
     # BOLT #11:
     #

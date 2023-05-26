@@ -45,8 +45,7 @@ class LogFormatterForConsole(logging.Formatter):
         record = _shorten_name_of_logrecord(record)
         if shortcut := getattr(record, 'custom_shortcut', None):
             record.name = f"{shortcut}/{record.name}"
-        text = super().format(record)
-        return text
+        return super().format(record)
 
 
 # try to make console log lines short... no timestamp, short levelname, no "electrum."
@@ -155,14 +154,14 @@ def _configure_stderr_logging(*, verbosity=None, verbosity_shortcuts=None):
         return
     console_stderr_handler = logging.StreamHandler(sys.stderr)
     console_stderr_handler.setFormatter(console_formatter)
-    if not verbosity and not verbosity_shortcuts:
-        console_stderr_handler.setLevel(logging.WARNING)
-        root_logger.addHandler(console_stderr_handler)
-    else:
+    if verbosity or verbosity_shortcuts:
         console_stderr_handler.setLevel(logging.DEBUG)
         root_logger.addHandler(console_stderr_handler)
         _process_verbosity_log_levels(verbosity)
         _process_verbosity_filter_shortcuts(verbosity_shortcuts, handler=console_stderr_handler)
+    else:
+        console_stderr_handler.setLevel(logging.WARNING)
+        root_logger.addHandler(console_stderr_handler)
     if _inmemory_startup_logs:
         _inmemory_startup_logs.dump_to_target(console_stderr_handler)
 
@@ -195,10 +194,7 @@ def _process_verbosity_filter_shortcuts(verbosity_shortcuts, *, handler: 'loggin
         return
     # depending on first character being '^', either blacklist or whitelist
     is_blacklist = verbosity_shortcuts[0] == '^'
-    if is_blacklist:
-        filters = verbosity_shortcuts[1:]
-    else:  # whitelist
-        filters = verbosity_shortcuts[0:]
+    filters = verbosity_shortcuts[1:] if is_blacklist else verbosity_shortcuts[:]
     filt = ShortcutFilteringFilter(is_blacklist=is_blacklist, filters=filters)
     # apply filter directly (and only!) on stderr handler
     # note that applying on one of the root loggers directly would not work,
@@ -234,17 +230,8 @@ class ShortcutFilteringFilter(logging.Filter):
         # do filtering
         shortcut = getattr(record, 'custom_shortcut', None)
         if self.__is_blacklist:
-            if shortcut is None:
-                return True
-            if shortcut in self.__filters:
-                return False
-            return True
-        else:  # whitelist
-            if shortcut is None:
-                return False
-            if shortcut in self.__filters:
-                return True
-            return False
+            return True if shortcut is None else shortcut not in self.__filters
+        return False if shortcut is None else shortcut in self.__filters
 
 
 # enable logs universally (including for other libraries)
@@ -274,8 +261,7 @@ electrum_logger.setLevel(logging.DEBUG)
 # --- External API
 
 def get_logger(name: str) -> logging.Logger:
-    if name.startswith("electrum."):
-        name = name[9:]
+    name = name.removeprefix("electrum.")
     return electrum_logger.getChild(name)
 
 
@@ -294,10 +280,7 @@ class Logger:
 
     def __get_logger_for_obj(self) -> logging.Logger:
         cls = self.__class__
-        if cls.__module__:
-            name = f"{cls.__module__}.{cls.__name__}"
-        else:
-            name = cls.__name__
+        name = f"{cls.__module__}.{cls.__name__}" if cls.__module__ else cls.__name__
         try:
             diag_name = self.diagnostic_name()
         except Exception as e:
@@ -356,16 +339,15 @@ def get_logfile_path() -> Optional[pathlib.Path]:
 
 
 def describe_os_version() -> str:
-    if 'ANDROID_DATA' in os.environ:
-        #from kivy import utils
-        #if utils.platform != "android":
-        #    return utils.platform
-        import jnius
-        bv = jnius.autoclass('android.os.Build$VERSION')
-        b = jnius.autoclass('android.os.Build')
-        return "Android {} on {} {} ({})".format(bv.RELEASE, b.BRAND, b.DEVICE, b.DISPLAY)
-    else:
+    if 'ANDROID_DATA' not in os.environ:
         return platform.platform()
+    #from kivy import utils
+    #if utils.platform != "android":
+    #    return utils.platform
+    import jnius
+    bv = jnius.autoclass('android.os.Build$VERSION')
+    b = jnius.autoclass('android.os.Build')
+    return f"Android {bv.RELEASE} on {b.BRAND} {b.DEVICE} ({b.DISPLAY})"
 
 
 def get_git_version() -> Optional[str]:

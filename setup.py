@@ -17,7 +17,7 @@ _min_python_version_tuple = tuple(map(int, (MIN_PYTHON_VERSION.split("."))))
 
 
 if sys.version_info[:3] < _min_python_version_tuple:
-    sys.exit("Error: Electrum requires Python version >= %s..." % MIN_PYTHON_VERSION)
+    sys.exit(f"Error: Electrum requires Python version >= {MIN_PYTHON_VERSION}...")
 
 with open('contrib/requirements/requirements.txt') as f:
     requirements = f.read().splitlines()
@@ -57,18 +57,21 @@ extras_require['fast'] = extras_require['crypto']
 setup(
     name="Electrum",
     version=version.ELECTRUM_VERSION,
-    python_requires='>={}'.format(MIN_PYTHON_VERSION),
+    python_requires=f'>={MIN_PYTHON_VERSION}',
     install_requires=requirements,
     extras_require=extras_require,
-    packages=(['electrum',]
-              + [('electrum.'+pkg) for pkg in
-                 find_packages('electrum', exclude=["tests", "gui.kivy", "gui.kivy.*"])]),
-    package_dir={
-        'electrum': 'electrum'
-    },
-    # Note: MANIFEST.in lists what gets included in the tar.gz, and the
-    # package_data kwarg lists what gets put in site-packages when pip installing the tar.gz.
-    # By specifying include_package_data=True, MANIFEST.in becomes responsible for both.
+    packages=(
+        [
+            'electrum',
+        ]
+        + [
+            f'electrum.{pkg}'
+            for pkg in find_packages(
+                'electrum', exclude=["tests", "gui.kivy", "gui.kivy.*"]
+            )
+        ]
+    ),
+    package_dir={'electrum': 'electrum'},
     include_package_data=True,
     scripts=['electrum/electrum'],
     data_files=data_files,

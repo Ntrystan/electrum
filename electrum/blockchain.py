@@ -49,22 +49,22 @@ class InvalidHeader(Exception):
     pass
 
 def serialize_header(header_dict: dict) -> str:
-    s = int_to_hex(header_dict['version'], 4) \
-        + rev_hex(header_dict['prev_block_hash']) \
-        + rev_hex(header_dict['merkle_root']) \
-        + int_to_hex(int(header_dict['timestamp']), 4) \
-        + int_to_hex(int(header_dict['bits']), 4) \
+    return (
+        int_to_hex(header_dict['version'], 4)
+        + rev_hex(header_dict['prev_block_hash'])
+        + rev_hex(header_dict['merkle_root'])
+        + int_to_hex(int(header_dict['timestamp']), 4)
+        + int_to_hex(int(header_dict['bits']), 4)
         + int_to_hex(int(header_dict['nonce']), 4)
-    return s
+    )
 
 def deserialize_header(s: bytes, height: int) -> dict:
     if not s:
-        raise InvalidHeader('Invalid header: {}'.format(s))
+        raise InvalidHeader(f'Invalid header: {s}')
     if len(s) != HEADER_SIZE:
-        raise InvalidHeader('Invalid header length: {}'.format(len(s)))
+        raise InvalidHeader(f'Invalid header length: {len(s)}')
     hex_to_int = lambda s: int.from_bytes(s, byteorder='little')
-    h = {}
-    h['version'] = hex_to_int(s[0:4])
+    h = {'version': hex_to_int(s[:4])}
     h['prev_block_hash'] = hash_encode(s[4:36])
     h['merkle_root'] = hash_encode(s[36:68])
     h['timestamp'] = hex_to_int(s[68:72])
@@ -203,7 +203,7 @@ class Blockchain(Logger):
 
     def get_max_child(self) -> Optional[int]:
         children = self.get_direct_children()
-        return max([x.forkpoint for x in children]) if children else None
+        return max(x.forkpoint for x in children) if children else None
 
     def get_max_forkpoint(self) -> int:
         """Returns the max height where there is a fork
@@ -243,7 +243,7 @@ class Blockchain(Logger):
         return self.height() - self.get_max_forkpoint() + 1
 
     def get_name(self) -> str:
-        return self.get_hash(self.get_max_forkpoint()).lstrip('0')[0:10]
+        return self.get_hash(self.get_max_forkpoint()).lstrip('0')[:10]
 
     def check_header(self, header: dict) -> bool:
         header_hash = hash_header(header)
@@ -296,14 +296,18 @@ class Blockchain(Logger):
     def verify_header(cls, header: dict, prev_hash: str, target: int, expected_header_hash: str=None) -> None:
         _hash = hash_header(header)
         if expected_header_hash and expected_header_hash != _hash:
-            raise Exception("hash mismatches with expected: {} vs {}".format(expected_header_hash, _hash))
+            raise Exception(
+                f"hash mismatches with expected: {expected_header_hash} vs {_hash}"
+            )
         if prev_hash != header.get('prev_block_hash'):
-            raise Exception("prev hash mismatch: %s vs %s" % (prev_hash, header.get('prev_block_hash')))
+            raise Exception(
+                f"prev hash mismatch: {prev_hash} vs {header.get('prev_block_hash')}"
+            )
         if constants.net.TESTNET:
             return
         bits = cls.target_to_bits(target)
         if bits != header.get('bits'):
-            raise Exception("bits mismatch: %s vs %s" % (bits, header.get('bits')))
+            raise Exception(f"bits mismatch: {bits} vs {header.get('bits')}")
         block_hash_as_num = int.from_bytes(bfh(_hash), byteorder='big')
         if block_hash_as_num > target:
             raise Exception(f"insufficient proof of work: {block_hash_as_num} vs target {target}")
@@ -430,7 +434,9 @@ class Blockchain(Logger):
         elif not os.path.exists(util.get_headers_dir(self.config)):
             raise FileNotFoundError('Electrum headers_dir does not exist. Was it deleted while running?')
         else:
-            raise FileNotFoundError('Cannot find headers file but headers_dir is there. Should be at {}'.format(path))
+            raise FileNotFoundError(
+                f'Cannot find headers file but headers_dir is there. Should be at {path}'
+            )
 
     @with_lock
     def write(self, data: bytes, offset: int, truncate: bool=True) -> None:
@@ -471,10 +477,10 @@ class Blockchain(Logger):
             f.seek(delta * HEADER_SIZE)
             h = f.read(HEADER_SIZE)
             if len(h) < HEADER_SIZE:
-                raise Exception('Expected to read a full header. This was only {} bytes'.format(len(h)))
-        if h == bytes([0])*HEADER_SIZE:
-            return None
-        return deserialize_header(h, height)
+                raise Exception(
+                    f'Expected to read a full header. This was only {len(h)} bytes'
+                )
+        return None if h == bytes([0])*HEADER_SIZE else deserialize_header(h, height)
 
     def header_at_tip(self) -> Optional[dict]:
         """Return latest header."""
@@ -484,16 +490,7 @@ class Blockchain(Logger):
     def is_tip_stale(self) -> bool:
         STALE_DELAY = 8 * 60 * 60  # in seconds
         header = self.header_at_tip()
-        if not header:
-            return True
-        # note: We check the timestamp only in the latest header.
-        #       The Bitcoin consensus has a lot of leeway here:
-        #       - needs to be greater than the median of the timestamps of the past 11 blocks, and
-        #       - up to at most 2 hours into the future compared to local clock
-        #       so there is ~2 hours of leeway in either direction
-        if header['timestamp'] + STALE_DELAY < time.time():
-            return True
-        return False
+        return True if not header else header['timestamp'] + STALE_DELAY < time.time()
 
     def get_hash(self, height: int) -> str:
         def is_height_checkpoint():
@@ -582,8 +579,7 @@ class Blockchain(Logger):
         """work done by single header at given height"""
         chunk_idx = height // 2016 - 1
         target = self.get_target(chunk_idx)
-        work = ((2 ** 256 - target - 1) // (target + 1)) + 1
-        return work
+        return ((2 ** 256 - target - 1) // (target + 1)) + 1
 
     @with_lock
     def get_chainwork(self, height=None) -> int:
@@ -663,10 +659,7 @@ def check_header(header: dict) -> Optional[Blockchain]:
     if type(header) is not dict:
         return None
     with blockchains_lock: chains = list(blockchains.values())
-    for b in chains:
-        if b.check_header(header):
-            return b
-    return None
+    return next((b for b in chains if b.check_header(header)), None)
 
 
 def can_connect(header: dict) -> Optional[Blockchain]:
@@ -674,10 +667,7 @@ def can_connect(header: dict) -> Optional[Blockchain]:
     with header, or None.
     """
     with blockchains_lock: chains = list(blockchains.values())
-    for b in chains:
-        if b.can_connect(header):
-            return b
-    return None
+    return next((b for b in chains if b.can_connect(header)), None)
 
 
 def get_chains_that_contain_header(height: int, header_hash: str) -> Sequence[Blockchain]:
